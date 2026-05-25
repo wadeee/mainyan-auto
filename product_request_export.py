@@ -105,9 +105,9 @@ def compute_category_sums(detail_file: Path, store_names: set[str]) -> dict:
 
     sums: dict[tuple[int, str], float] = {}
     for row in ws.iter_rows(min_row=2):
-        category = row[1].value   # B列：商品分类
-        org = row[5].value        # F列：订货组织
-        amount = row[13].value    # N列：订货金额
+        category = row[1].value  # B列：商品分类
+        org = row[5].value  # F列：订货组织
+        amount = row[13].value  # N列：订货金额
 
         if category is None or org is None or amount is None:
             continue
@@ -157,7 +157,7 @@ def read_data_file(data_file: Path):
 
 
 def merge_into_template(data_rows, total_col_idx, store_columns, template_file, output_file,
-                        category_sums=None):
+                        category_sums=None, target_date=None):
     wb = load_workbook(template_file)
     ws = wb.active
 
@@ -234,11 +234,29 @@ def merge_into_template(data_rows, total_col_idx, store_columns, template_file, 
         for col_num in range(8, last_col + 1):
             ws.column_dimensions[get_column_letter(col_num)].width = g_width
 
+    # 保存前：将表头行 G7 起的单元格值替换为括号内的内容
+    for col in range(7, last_col + 1):
+        cell = ws.cell(row=HEADER_ROW, column=col)
+        if cell.value:
+            m = re.search(r'[（(](.+?)[）)]', str(cell.value))
+            if m:
+                cell.value = m.group(1)
+
+    # 保存前：更新 A2 和 C2 中的日期
+    if target_date:
+        target_dt = datetime.strptime(target_date, "%Y.%m.%d")
+        prev_day = (target_dt - timedelta(days=2)).strftime("%Y.%m.%d")
+        for cell_ref, new_date in [("A2", prev_day), ("C2", target_date)]:
+            cell = ws[cell_ref]
+            if cell.value:
+                cell.value = re.sub(r'\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}', new_date, str(cell.value))
+
     wb.save(output_file)
     return last_data_row
 
 
-def merge_board(data_file: Path, detail_file: Path, template_file: Path, output_file: Path):
+def merge_board(data_file: Path, detail_file: Path, template_file: Path, output_file: Path,
+                target_date=None):
     print(f"数据源: {data_file}")
     print(f"明细  : {detail_file}")
     print(f"模板  : {template_file}")
@@ -268,7 +286,7 @@ def merge_board(data_file: Path, detail_file: Path, template_file: Path, output_
 
     print("填入模板...")
     last_row = merge_into_template(data_rows, total_col_idx, store_columns, template_file, output_file,
-                                   category_sums)
+                                   category_sums, target_date=target_date)
     last_letter = get_column_letter(6 + len(store_columns))
     print(f"  数据区: A{DATA_START_ROW}:{last_letter}{last_row}")
 
@@ -672,7 +690,7 @@ def main():
             date_str = target_date.replace(".", "-")
             output_file = OUTPUT_DIR / date_str / f"订货商品汇总看板_格式化_{date_str}.xlsx"
 
-            merge_board(summary_path, item_path, TEMPLATE_FILE, output_file)
+            merge_board(summary_path, item_path, TEMPLATE_FILE, output_file, target_date=target_date)
 
             print(f"\n{'=' * 55}")
             print(f"  ✅ 全部完成！")
