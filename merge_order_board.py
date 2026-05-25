@@ -11,7 +11,6 @@ from datetime import date
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
-
 # ============================================================
 # 配置区 - 按需修改
 # ============================================================
@@ -21,6 +20,18 @@ BASE_DIR = Path("C:/Users/Wadec/Desktop/订货商品汇总看板/2026-05-27")
 # today_str = date.today().strftime("%Y-%m-%d")
 DATA_FILE = BASE_DIR / "原始下载" / f"订货商品汇总看板_2026-05-27.xlsx"
 
+# 明细数据源（用于计算 G2-G5 等汇总区的分类金额）
+DETAIL_FILE = BASE_DIR / "原始下载" / f"订货商品明细看板_2026-05-27.xlsx"
+
+# 汇总区行号 → 商品分类映射（行号对应模板中的 row 2-5）
+ROW_CATEGORY_MAP = {
+    2: ["冷冻面团"],
+    3: ["蛋糕类", "成品面包类", "饼干类"],
+    4: ["专版包材类", "公版包材类", "工衣工帽围裙", "模具", "保洁用品", "饼干类/外", "慕斯类/外", "饮品类/外",
+        "其他/外", "热销类", "冷冻馅料类", "肉类", "油脂类", "冷藏馅料类", "粉类", "糖类", "常温馅料类", "干果类"],
+    5: ["配送费"],
+}
+
 # 格式模板文件（固定，不会变）
 TEMPLATE_FILE = Path("订货商品汇总看板_格式化模板.xlsx")
 
@@ -28,8 +39,8 @@ TEMPLATE_FILE = Path("订货商品汇总看板_格式化模板.xlsx")
 OUTPUT_FILE = BASE_DIR / f"订货商品汇总看板_格式化_2026-05-27.xlsx"
 
 # 模板中示例数据所在行（第几行开始、共几行）
-SAMPLE_ROW_START = 8    # 示例数据起始行
-SAMPLE_ROW_COUNT = 2    # 示例数据行数
+SAMPLE_ROW_START = 8  # 示例数据起始行
+SAMPLE_ROW_COUNT = 2  # 示例数据行数
 
 # 数据写入起始行（删除示例行后，从此行开始写入真实数据）
 DATA_START_ROW = 8
@@ -47,6 +58,8 @@ FIXED_COLUMN_MAP = [
 ]
 
 TOTAL_ORDER_HEADER = "合计订货量"
+
+
 # ============================================================
 
 
@@ -58,6 +71,45 @@ def copy_cell_style(src_cell, dst_cell):
         dst_cell.border = copy.copy(src_cell.border)
         dst_cell.alignment = copy.copy(src_cell.alignment)
         dst_cell.number_format = src_cell.number_format
+
+
+def compute_category_sums(detail_file: Path, store_names: list[str]) -> dict:
+    """从明细看板读取数据，按(行号, 门店名)分组求和订货金额。
+
+    返回 {(row_num, store_name): float}，row_num 为模板行号 2-5。
+    """
+    wb = load_workbook(detail_file, data_only=True)
+    ws = wb.active
+
+    cat_to_row = {}
+    for row_num, categories in ROW_CATEGORY_MAP.items():
+        for cat in categories:
+            cat_to_row[cat] = row_num
+
+    sums: dict[tuple[int, str], float] = {}
+    for row in ws.iter_rows(min_row=2):
+        category = row[1].value  # B列：商品分类
+        org = row[5].value  # F列：订货组织
+        amount = row[13].value  # N列：订货金额
+
+        if category is None or org is None or amount is None:
+            continue
+
+        category_str = str(category).strip()
+        org_str = str(org).strip()
+
+        row_num = cat_to_row.get(category_str)
+        if row_num is None:
+            continue
+
+        if org_str not in store_names:
+            continue
+
+        key = (row_num, org_str)
+        sums[key] = sums.get(key, 0) + float(amount)
+
+    wb.close()
+    return sums
 
 
 def read_data_file(data_file: Path):
@@ -89,7 +141,8 @@ def read_data_file(data_file: Path):
     return total_col_idx, store_columns, rows
 
 
-def merge_into_template(data_rows, total_col_idx, store_columns, template_file, output_file):
+def merge_into_template(data_rows, total_col_idx, store_columns, template_file, output_file,
+                        category_sums=None):
     wb = load_workbook(template_file)
     ws = wb.active
 
@@ -155,10 +208,14 @@ def merge_into_template(data_rows, total_col_idx, store_columns, template_file, 
 
     last_data_row = DATA_START_ROW + len(data_rows) - 1
 
-    # 门店列 rows 2-5 统一赋值为 0
-    for col_num in range(7, last_col + 1):
+    # 门店列 rows 2-5：填入分类汇总金额
+    for offset, (_, store_name) in enumerate(store_columns):
+        col_num = 7 + offset
         for r in range(2, 6):
-            ws.cell(row=r, column=col_num).value = 0
+            if category_sums:
+                ws.cell(row=r, column=col_num).value = category_sums.get((r, store_name), 0)
+            else:
+                ws.cell(row=r, column=col_num).value = 0
 
     # 更新第6行门店列公式：统一格式 =SUM({col}2:{col}5)
     for col_num in range(7, last_col + 1):
@@ -192,8 +249,19 @@ def main():
     print(f"  合计订货量列: {get_column_letter(total_col_idx + 1)} (索引 {total_col_idx})")
     print(f"  门店列 ({len(store_columns)}): {', '.join(name for _, name in store_columns)}")
 
+    category_sums = {}
+    if DETAIL_FILE.exists():
+        store_names = {name for _, name in store_columns}
+        print("读取明细数据，计算分类汇总金额...")
+        category_sums = compute_category_sums(DETAIL_FILE, store_names)
+        for (r, store), val in sorted(category_sums.items()):
+            print(f"  Row {r} / {store}: {val}")
+    else:
+        print(f"  明细文件不存在，汇总区将填入 0: {DETAIL_FILE}")
+
     print("填入模板...")
-    last_row = merge_into_template(data_rows, total_col_idx, store_columns, TEMPLATE_FILE, OUTPUT_FILE)
+    last_row = merge_into_template(data_rows, total_col_idx, store_columns, TEMPLATE_FILE, OUTPUT_FILE,
+                                   category_sums)
     last_letter = get_column_letter(6 + len(store_columns))
     print(f"  数据区: A{DATA_START_ROW}:{last_letter}{last_row}")
 
