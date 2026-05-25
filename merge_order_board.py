@@ -153,11 +153,12 @@ def merge_into_template(data_rows, total_col_idx, store_columns, template_file, 
                 src = sample_cells[len(sample_cells) - 1]
             copy_cell_style(src, ws.cell(row=excel_row, column=col_idx))
 
-    # 更新第6行各列 SUM 公式（数据区汇总）
     last_data_row = DATA_START_ROW + len(data_rows) - 1
-    for col_num in [6] + [7 + i for i in range(store_count)]:
+
+    # 更新第6行门店列公式：统一格式 =SUM({col}2:{col}5)
+    for col_num in [7 + i for i in range(store_count)]:
         letter = get_column_letter(col_num)
-        ws[f"{letter}6"] = f"=SUM({letter}{DATA_START_ROW}:{letter}{last_data_row})"
+        ws[f"{letter}6"] = f"=SUM({letter}2:{letter}5)"
 
     wb.save(output_file)
     return last_data_row
