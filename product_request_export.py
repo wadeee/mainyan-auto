@@ -9,10 +9,10 @@
   2. 订货商品明细看板 (ProductRequestItemBoard)
 
 用法：
-    python pospal_export.py                  # 导出后天的数据
-    python pospal_export.py --date 2026.05.30  # 指定日期
-    python pospal_export.py --days 2            # N天后（默认2=后天）
-    python pospal_export.py --headless          # 无头模式（不显示浏览器）
+    python product_request_export.py                    # 导出后天的数据
+    python product_request_export.py --date 2026.05.30  # 指定日期
+    python product_request_export.py --days 2           # N天后（默认2=后天）
+    python product_request_export.py --headless         # 无头模式（不显示浏览器）
 """
 
 import argparse
@@ -33,7 +33,6 @@ ITEM_BOARD_URL = "https://css69.pospal.cn/ChainStoreSupplySeller/ProductRequestI
 
 OUTPUT_DIR = Path.home() / "Desktop" / "订货商品汇总看板"
 
-# 单据状态要勾选的项
 STATUS_OPTIONS = [
     "待审核",
     "配货中",
@@ -45,7 +44,6 @@ STATUS_OPTIONS = [
     "已作废",
 ]
 
-# 要勾选的商品分类（与 Pospal DOM 中的 span 文本完全一致）
 TARGET_CATEGORIES = [
     "配送费",
     "包材耗材",
@@ -127,7 +125,6 @@ def login(page):
     """)
     time.sleep(1.5)
 
-    # 确认切换成功
     placeholder = page.evaluate("""
         (function() {
             var inputs = document.querySelectorAll('input');
@@ -151,7 +148,6 @@ def login(page):
                 if (inputs[i].placeholder === '请输入员工工号') inputs[i].value = "{WORKER_ID}";
                 if (inputs[i].placeholder === '请输入工号密码') inputs[i].value = "{PASSWORD}";
             }}
-            // 触发 input 事件让框架感知到变化
             inputs = document.querySelectorAll('input');
             for (var i = 0; i < inputs.length; i++) {{
                 if (inputs[i].value) {{
@@ -178,13 +174,8 @@ def navigate_to_board(page, board_url: str, board_name: str):
     print(f"  已到达 → {page.url}")
 
 
-def setup_filters(page, target_date: str):
-    """
-    设置筛选条件：
-      1. 切换到「期望到货时间」标签
-      2. 设置日期
-      3. 选择商品分类
-    """
+def setup_filters(page, target_date: str, *, select_status: bool = False):
+    """设置筛选条件：期望到货时间、商品分类、日期范围，可选单据状态"""
     print("\n  [筛选] 设置筛选条件...")
 
     # ── 1. 切换日期类型标签 ──
@@ -205,7 +196,6 @@ def setup_filters(page, target_date: str):
     if result == "not found":
         raise RuntimeError("未找到「期望到货时间」标签")
 
-    # 验证标签切换
     tab_status = page.evaluate("""
         (function() {
             var r = [];
@@ -220,7 +210,7 @@ def setup_filters(page, target_date: str):
     """)
     print(f"    标签状态: {tab_status}")
 
-    # ── 2. 展开高级搜索，选择分类 ──
+    # ── 2. 展开高级搜索，选择商品分类 ──
     print("  → 展开高级搜索面板...")
     page.evaluate("document.getElementById('advancedBtn').click()")
     time.sleep(0.5)
@@ -230,7 +220,7 @@ def setup_filters(page, target_date: str):
     time.sleep(1.0)
 
     print(f"  → 勾选 {len(TARGET_CATEGORIES)} 个分类...")
-    categories_js = str(TARGET_CATEGORIES).replace("'", '"')  # 转成 JS 数组字面量
+    categories_js = str(TARGET_CATEGORIES).replace("'", '"')
     page.evaluate(f"""
         (function() {{
             var targets = {categories_js};
@@ -244,7 +234,6 @@ def setup_filters(page, target_date: str):
         }})()
     """)
 
-    # 验证勾选状态
     check_result = page.evaluate(f"""
         (function() {{
             var targets = {categories_js};
@@ -262,116 +251,6 @@ def setup_filters(page, target_date: str):
     print(f"    勾选验证: {check_result}")
     if "false" in check_result or check_result.count(":true") < len(TARGET_CATEGORIES):
         print("  ⚠️  部分分类未勾选，尝试重试...")
-        # 重试一次
-        page.evaluate(f"""
-            (function() {{
-                var targets = {categories_js};
-                var divs = document.querySelectorAll('.checkBoxDiv');
-                divs.forEach(function(d) {{
-                    var span = d.querySelector('span');
-                    if (span && targets.indexOf(span.textContent.trim()) >= 0 && !d.classList.contains('on')) {{
-                        d.click();
-                    }}
-                }});
-            }})()
-        """)
-
-    # ── 3. 设置日期（切换标签后立刻设置）──
-    print(f"  → 设置日期: {target_date}...")
-    set_date(page, "开始日期", f"{target_date} 00:00")
-    set_date(page, "结束日期", f"{target_date} 23:59")
-
-    print("  → 点击「确定」关闭弹框...")
-    click_by_text(page, "确定", "确定弹框")
-    time.sleep(0.5)
-
-
-def setup_filters_item(page, target_date: str):
-    """
-    设置筛选条件：
-      1. 切换到「期望到货时间」标签
-      2. 设置日期
-      3. 选择商品分类
-      4. 选择单据状态
-    """
-    print("\n  [筛选] 设置筛选条件...")
-
-    # ── 1. 切换日期类型标签 ──
-    print("  → 切换到「期望到货时间」标签...")
-    result = page.evaluate("""
-        (function() {
-            var lis = document.querySelectorAll('li');
-            for (var i = 0; i < lis.length; i++) {
-                if (lis[i].textContent.trim() === '期望到货时间') {
-                    lis[i].click();
-                    return 'clicked li[' + i + ']';
-                }
-            }
-            return 'not found';
-        })()
-    """)
-    print(f"    {result}")
-    if result == "not found":
-        raise RuntimeError("未找到「期望到货时间」标签")
-
-    # 验证标签切换
-    tab_status = page.evaluate("""
-        (function() {
-            var r = [];
-            document.querySelectorAll('li').forEach(function(li) {
-                var t = li.textContent.trim();
-                if (t === '订货时间' || t === '期望到货时间') {
-                    r.push(t + ':' + li.className);
-                }
-            });
-            return r.join(' | ');
-        })()
-    """)
-    print(f"    标签状态: {tab_status}")
-
-    # ── 2. 展开高级搜索，选择分类 ──
-    print("  → 展开高级搜索面板...")
-    page.evaluate("document.getElementById('advancedBtn').click()")
-    time.sleep(0.5)
-
-    print("  → 打开分类选择弹框...")
-    page.evaluate("document.getElementById('selectCategory').click()")
-    time.sleep(1.0)
-
-    print(f"  → 勾选 {len(TARGET_CATEGORIES)} 个分类...")
-    categories_js = str(TARGET_CATEGORIES).replace("'", '"')  # 转成 JS 数组字面量
-    page.evaluate(f"""
-        (function() {{
-            var targets = {categories_js};
-            var divs = document.querySelectorAll('.checkBoxDiv');
-            divs.forEach(function(d) {{
-                var span = d.querySelector('span');
-                if (span && targets.indexOf(span.textContent.trim()) >= 0) {{
-                    d.click();
-                }}
-            }});
-        }})()
-    """)
-
-    # 验证勾选状态
-    check_result = page.evaluate(f"""
-        (function() {{
-            var targets = {categories_js};
-            var divs = document.querySelectorAll('.checkBoxDiv');
-            var r = [];
-            divs.forEach(function(d) {{
-                var s = d.querySelector('span');
-                if (s && targets.indexOf(s.textContent.trim()) >= 0) {{
-                    r.push(s.textContent.trim() + ':' + d.classList.contains('on'));
-                }}
-            }});
-            return r.join(' | ');
-        }})()
-    """)
-    print(f"    勾选验证: {check_result}")
-    if "false" in check_result or check_result.count(":true") < len(TARGET_CATEGORIES):
-        print("  ⚠️  部分分类未勾选，尝试重试...")
-        # 重试一次
         page.evaluate(f"""
             (function() {{
                 var targets = {categories_js};
@@ -389,51 +268,40 @@ def setup_filters_item(page, target_date: str):
     click_by_text(page, "确定", "确定弹框")
     time.sleep(0.5)
 
-    # ── 3. 选择单据状态──
-    print("  → 选择单据状态...")
-    # 直接通过ID找到下拉框并点击展开
-    page.evaluate("""() => {
-        const statusSelector = document.getElementById('ddl_productRequestStatus');
-        if (statusSelector) {
-            statusSelector.click();
-            return "单据状态下拉框已点击展开";
-        }
-        return "未找到单据状态下拉框";
-    }""")
-    time.sleep(1.0)
+    # ── 3. 选择单据状态（仅明细看板）──
+    if select_status:
+        print("  → 选择单据状态...")
+        page.evaluate("""
+            (function() {
+                var el = document.getElementById('ddl_productRequestStatus');
+                if (el) el.click();
+            })()
+        """)
+        time.sleep(1.0)
 
-    # 勾选所有状态 - 根据实际DOM结构调整选择器
-    page.evaluate("""(targets) => {
-        const statusItems = document.querySelectorAll('#ddl_productRequestStatus .selectBox ul li');
-        console.log('找到单据状态选项数量:', statusItems.length);
-        for (const item of statusItems) {
-            const title = item.getAttribute('title');
-            if (title && targets.includes(title.trim())) {
-                console.log('处理状态:', title, '当前class:', item.className);
-                // 确保是 on 状态，如果不是就点击切换
-                if (!item.classList.contains('on')) {
-                    item.click();
-                    console.log('已点击勾选:', title);
+        page.evaluate("""
+            (function(targets) {
+                var items = document.querySelectorAll('#ddl_productRequestStatus .selectBox ul li');
+                for (var i = 0; i < items.length; i++) {
+                    var title = items[i].getAttribute('title');
+                    if (title && targets.indexOf(title.trim()) >= 0 && !items[i].classList.contains('on')) {
+                        items[i].click();
+                    }
                 }
-            }
-        }
-        // 点击关闭按钮收起下拉框
-        const closeBtn = document.querySelector('#ddl_productRequestStatus .selectBox .bottomBar .btnGrey14');
-        if (closeBtn) {
-            closeBtn.click();
-            console.log('已关闭单据状态下拉框');
-        }
-    }""", STATUS_OPTIONS)
-    time.sleep(1.0)
+                var closeBtn = document.querySelector('#ddl_productRequestStatus .selectBox .bottomBar .btnGrey14');
+                if (closeBtn) closeBtn.click();
+            })(%s)
+        """ % str(STATUS_OPTIONS).replace("'", '"'))
+        time.sleep(1.0)
 
-    # ── 3. 设置日期（切换标签后立刻设置）──
+    # ── 4. 设置日期范围 ──
     print(f"  → 设置日期: {target_date}...")
     set_date(page, "开始日期", f"{target_date} 00:00")
     set_date(page, "结束日期", f"{target_date} 23:59")
 
 
 def search_and_count_rows(page, target_date: str, btn_id: str, max_retries: int = 3) -> int:
-    """点击查询按钮，验证日期未被重置，返回结果行数。"""
+    """点击查询按钮，验证日期未被重置，返回结果行数"""
     print("\n  [查询] 执行查询...")
 
     for attempt in range(1, max_retries + 1):
@@ -469,17 +337,15 @@ def search_and_count_rows(page, target_date: str, btn_id: str, max_retries: int 
 
 
 def export_and_save(page, target_date: str, file_prefix: str) -> Path:
-    """点击导出，等待下载，保存到输出目录，返回文件路径。"""
+    """点击导出，等待下载，保存到输出目录，返回文件路径"""
     print("\n  [导出] 导出文件...")
     time.sleep(3)
 
-    # 格式化日期并创建目标文件夹
-    date_str = target_date.replace(".", "-")  # 2026.05.25 → 2026-05-25
+    date_str = target_date.replace(".", "-")
     daily_output_dir = OUTPUT_DIR / date_str / "原始下载"
     daily_output_dir.mkdir(parents=True, exist_ok=True)
     print(f"  → 输出至: {daily_output_dir}")
 
-    # 使用 Playwright 的 expect_download 上下文来可靠捕获下载
     with page.expect_download(timeout=60_000) as dl_info:
         result = page.evaluate("""
             (function() {
@@ -498,11 +364,9 @@ def export_and_save(page, target_date: str, file_prefix: str) -> Path:
             raise RuntimeError("未找到「导出」按钮")
 
     download = dl_info.value
-    suggested = download.suggested_filename
-    print(f"  下载文件名: {suggested}")
+    print(f"  下载文件名: {download.suggested_filename}")
 
     dest = daily_output_dir / f"{file_prefix}_{date_str}.xlsx"
-
     download.save_as(dest)
     print(f"  ✅ 已保存到: {dest}")
     return dest
@@ -515,7 +379,6 @@ def main():
     parser.add_argument("--headless", action="store_true", help="无头模式（不显示浏览器窗口）")
     args = parser.parse_args()
 
-    # 确定目标日期
     if args.date:
         target_date = args.date
     else:
@@ -550,7 +413,7 @@ def main():
         try:
             login(page)
 
-            # ── 任务 1：订货商品汇总看板 ──────────────────────────────────
+            # ── 任务 1：订货商品汇总看板 ──
             print(f"\n{'─' * 55}")
             print(f"  任务 1/2：订货商品汇总看板")
             print(f"{'─' * 55}")
@@ -560,25 +423,24 @@ def main():
             summary_row_count = search_and_count_rows(page, target_date, "btnLoadRequestList")
             summary_path = export_and_save(page, target_date, "订货商品汇总看板")
 
-            # ── 任务 2：订货商品明细看板 ──────────────────────────────────
+            # ── 任务 2：订货商品明细看板 ──
             print(f"\n{'─' * 55}")
             print(f"  任务 2/2：订货商品明细看板")
             print(f"{'─' * 55}")
 
             navigate_to_board(page, ITEM_BOARD_URL, "订货商品明细看板")
-            setup_filters_item(page, target_date)
+            setup_filters(page, target_date, select_status=True)
             item_row_count = search_and_count_rows(page, target_date, "btnList")
             item_path = export_and_save(page, target_date, "订货商品明细看板")
 
             print(f"\n{'=' * 55}")
             print(f"  ✅ 全部完成！")
-            # print(f"  订货商品汇总看板：{summary_row_count} 行 → {summary_path}")
+            print(f"  订货商品汇总看板：{summary_row_count} 行 → {summary_path}")
             print(f"  订货商品明细看板：{item_row_count} 行 → {item_path}")
             print(f"{'=' * 55}\n")
 
         except Exception as e:
             print(f"\n❌ 任务失败: {e}")
-            # 截图便于调试
             try:
                 screenshot = OUTPUT_DIR / "error_screenshot.png"
                 page.screenshot(path=str(screenshot))
@@ -588,7 +450,7 @@ def main():
             raise
         finally:
             context.close()
-            # browser.close()
+            browser.close()
 
 
 if __name__ == "__main__":
