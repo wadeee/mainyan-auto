@@ -551,14 +551,14 @@ def main():
             login(page)
 
             # ── 任务 1：订货商品汇总看板 ──────────────────────────────────
-            # print(f"\n{'─' * 55}")
-            # print(f"  任务 1/2：订货商品汇总看板")
-            # print(f"{'─' * 55}")
-            #
-            # navigate_to_board(page, SUMMARY_BOARD_URL, "订货商品汇总看板")
-            # setup_filters(page, target_date)
-            # summary_row_count = search_and_count_rows(page, target_date, "btnLoadRequestList")
-            # summary_path = export_and_save(page, target_date, "订货商品汇总看板")
+            print(f"\n{'─' * 55}")
+            print(f"  任务 1/2：订货商品汇总看板")
+            print(f"{'─' * 55}")
+
+            navigate_to_board(page, SUMMARY_BOARD_URL, "订货商品汇总看板")
+            setup_filters(page, target_date)
+            summary_row_count = search_and_count_rows(page, target_date, "btnLoadRequestList")
+            summary_path = export_and_save(page, target_date, "订货商品汇总看板")
 
             # ── 任务 2：订货商品明细看板 ──────────────────────────────────
             print(f"\n{'─' * 55}")
