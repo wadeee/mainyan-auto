@@ -1,7 +1,9 @@
 @echo off
 chcp 65001 >nul
-echo 正在导出后天（%DATE%）订货商品汇总看板...
 cd /d "%~dp0"
+
+for /f %%a in ('powershell -NoProfile -Command "(Get-Date).AddDays(2).ToString('yyyy-MM-dd')"') do set TARGET_DATE=%%a
+echo 正在导出 %TARGET_DATE% 订货商品汇总看板...
 
 call C:\ProgramData\anaconda3\condabin\conda.bat activate mainyan-auto
 
