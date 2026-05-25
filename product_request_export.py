@@ -33,6 +33,18 @@ ITEM_BOARD_URL = "https://css69.pospal.cn/ChainStoreSupplySeller/ProductRequestI
 
 OUTPUT_DIR = Path.home() / "Desktop" / "订货商品汇总看板"
 
+# 单据状态要勾选的项
+STATUS_OPTIONS = [
+    "待审核",
+    "配货中",
+    "已配货",
+    "已收货",
+    "已拒绝",
+    "已拒绝出库",
+    "已拒绝收货",
+    "已作废",
+]
+
 # 要勾选的商品分类（与 Pospal DOM 中的 span 文本完全一致）
 TARGET_CATEGORIES = [
     "配送费",
@@ -274,6 +286,152 @@ def setup_filters(page, target_date: str):
     time.sleep(0.5)
 
 
+def setup_filters_item(page, target_date: str):
+    """
+    设置筛选条件：
+      1. 切换到「期望到货时间」标签
+      2. 设置日期
+      3. 选择商品分类
+      4. 选择单据状态
+    """
+    print("\n  [筛选] 设置筛选条件...")
+
+    # ── 1. 切换日期类型标签 ──
+    print("  → 切换到「期望到货时间」标签...")
+    result = page.evaluate("""
+        (function() {
+            var lis = document.querySelectorAll('li');
+            for (var i = 0; i < lis.length; i++) {
+                if (lis[i].textContent.trim() === '期望到货时间') {
+                    lis[i].click();
+                    return 'clicked li[' + i + ']';
+                }
+            }
+            return 'not found';
+        })()
+    """)
+    print(f"    {result}")
+    if result == "not found":
+        raise RuntimeError("未找到「期望到货时间」标签")
+
+    # 验证标签切换
+    tab_status = page.evaluate("""
+        (function() {
+            var r = [];
+            document.querySelectorAll('li').forEach(function(li) {
+                var t = li.textContent.trim();
+                if (t === '订货时间' || t === '期望到货时间') {
+                    r.push(t + ':' + li.className);
+                }
+            });
+            return r.join(' | ');
+        })()
+    """)
+    print(f"    标签状态: {tab_status}")
+
+    # ── 2. 展开高级搜索，选择分类 ──
+    print("  → 展开高级搜索面板...")
+    page.evaluate("document.getElementById('advancedBtn').click()")
+    time.sleep(0.5)
+
+    print("  → 打开分类选择弹框...")
+    page.evaluate("document.getElementById('selectCategory').click()")
+    time.sleep(1.0)
+
+    print(f"  → 勾选 {len(TARGET_CATEGORIES)} 个分类...")
+    categories_js = str(TARGET_CATEGORIES).replace("'", '"')  # 转成 JS 数组字面量
+    page.evaluate(f"""
+        (function() {{
+            var targets = {categories_js};
+            var divs = document.querySelectorAll('.checkBoxDiv');
+            divs.forEach(function(d) {{
+                var span = d.querySelector('span');
+                if (span && targets.indexOf(span.textContent.trim()) >= 0) {{
+                    d.click();
+                }}
+            }});
+        }})()
+    """)
+
+    # 验证勾选状态
+    check_result = page.evaluate(f"""
+        (function() {{
+            var targets = {categories_js};
+            var divs = document.querySelectorAll('.checkBoxDiv');
+            var r = [];
+            divs.forEach(function(d) {{
+                var s = d.querySelector('span');
+                if (s && targets.indexOf(s.textContent.trim()) >= 0) {{
+                    r.push(s.textContent.trim() + ':' + d.classList.contains('on'));
+                }}
+            }});
+            return r.join(' | ');
+        }})()
+    """)
+    print(f"    勾选验证: {check_result}")
+    if "false" in check_result or check_result.count(":true") < len(TARGET_CATEGORIES):
+        print("  ⚠️  部分分类未勾选，尝试重试...")
+        # 重试一次
+        page.evaluate(f"""
+            (function() {{
+                var targets = {categories_js};
+                var divs = document.querySelectorAll('.checkBoxDiv');
+                divs.forEach(function(d) {{
+                    var span = d.querySelector('span');
+                    if (span && targets.indexOf(span.textContent.trim()) >= 0 && !d.classList.contains('on')) {{
+                        d.click();
+                    }}
+                }});
+            }})()
+        """)
+
+    print("  → 点击「确定」关闭弹框...")
+    click_by_text(page, "确定", "确定弹框")
+    time.sleep(0.5)
+
+    # ── 3. 选择单据状态──
+    print("  → 选择单据状态...")
+    # 直接通过ID找到下拉框并点击展开
+    page.evaluate("""() => {
+        const statusSelector = document.getElementById('ddl_productRequestStatus');
+        if (statusSelector) {
+            statusSelector.click();
+            return "单据状态下拉框已点击展开";
+        }
+        return "未找到单据状态下拉框";
+    }""")
+    time.sleep(1.0)
+
+    # 勾选所有状态 - 根据实际DOM结构调整选择器
+    page.evaluate("""(targets) => {
+        const statusItems = document.querySelectorAll('#ddl_productRequestStatus .selectBox ul li');
+        console.log('找到单据状态选项数量:', statusItems.length);
+        for (const item of statusItems) {
+            const title = item.getAttribute('title');
+            if (title && targets.includes(title.trim())) {
+                console.log('处理状态:', title, '当前class:', item.className);
+                // 确保是 on 状态，如果不是就点击切换
+                if (!item.classList.contains('on')) {
+                    item.click();
+                    console.log('已点击勾选:', title);
+                }
+            }
+        }
+        // 点击关闭按钮收起下拉框
+        const closeBtn = document.querySelector('#ddl_productRequestStatus .selectBox .bottomBar .btnGrey14');
+        if (closeBtn) {
+            closeBtn.click();
+            console.log('已关闭单据状态下拉框');
+        }
+    }""", STATUS_OPTIONS)
+    time.sleep(1.0)
+
+    # ── 3. 设置日期（切换标签后立刻设置）──
+    print(f"  → 设置日期: {target_date}...")
+    set_date(page, "开始日期", f"{target_date} 00:00")
+    set_date(page, "结束日期", f"{target_date} 23:59")
+
+
 def search_and_count_rows(page, target_date: str, btn_id: str, max_retries: int = 3) -> int:
     """点击查询按钮，验证日期未被重置，返回结果行数。"""
     print("\n  [查询] 执行查询...")
@@ -393,14 +551,14 @@ def main():
             login(page)
 
             # ── 任务 1：订货商品汇总看板 ──────────────────────────────────
-            print(f"\n{'─' * 55}")
-            print(f"  任务 1/2：订货商品汇总看板")
-            print(f"{'─' * 55}")
-
-            navigate_to_board(page, SUMMARY_BOARD_URL, "订货商品汇总看板")
-            setup_filters(page, target_date)
-            summary_row_count = search_and_count_rows(page, target_date, "btnLoadRequestList")
-            summary_path = export_and_save(page, target_date, "订货商品汇总看板")
+            # print(f"\n{'─' * 55}")
+            # print(f"  任务 1/2：订货商品汇总看板")
+            # print(f"{'─' * 55}")
+            #
+            # navigate_to_board(page, SUMMARY_BOARD_URL, "订货商品汇总看板")
+            # setup_filters(page, target_date)
+            # summary_row_count = search_and_count_rows(page, target_date, "btnLoadRequestList")
+            # summary_path = export_and_save(page, target_date, "订货商品汇总看板")
 
             # ── 任务 2：订货商品明细看板 ──────────────────────────────────
             print(f"\n{'─' * 55}")
@@ -408,13 +566,13 @@ def main():
             print(f"{'─' * 55}")
 
             navigate_to_board(page, ITEM_BOARD_URL, "订货商品明细看板")
-            setup_filters(page, target_date)
+            setup_filters_item(page, target_date)
             item_row_count = search_and_count_rows(page, target_date, "btnList")
             item_path = export_and_save(page, target_date, "订货商品明细看板")
 
             print(f"\n{'=' * 55}")
             print(f"  ✅ 全部完成！")
-            print(f"  订货商品汇总看板：{summary_row_count} 行 → {summary_path}")
+            # print(f"  订货商品汇总看板：{summary_row_count} 行 → {summary_path}")
             print(f"  订货商品明细看板：{item_row_count} 行 → {item_path}")
             print(f"{'=' * 55}\n")
 
