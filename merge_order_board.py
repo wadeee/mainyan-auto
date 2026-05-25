@@ -15,11 +15,11 @@ from openpyxl.utils import get_column_letter
 # ============================================================
 # 配置区 - 按需修改
 # ============================================================
-BASE_DIR = Path("C:/Users/Wadec/Desktop/订货商品汇总看板/2026-05-27/原始下载")
+BASE_DIR = Path("C:/Users/Wadec/Desktop/订货商品汇总看板/2026-05-27")
 
 # 数据源文件（每日导出的原始看板）
 # today_str = date.today().strftime("%Y-%m-%d")
-DATA_FILE = BASE_DIR / f"订货商品汇总看板_2026-05-27.xlsx"
+DATA_FILE = BASE_DIR / "原始下载" / f"订货商品汇总看板_2026-05-27.xlsx"
 
 # 格式模板文件（固定，不会变）
 TEMPLATE_FILE = Path("订货商品汇总看板_格式化模板.xlsx")
