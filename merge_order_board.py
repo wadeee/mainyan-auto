@@ -165,6 +165,12 @@ def merge_into_template(data_rows, total_col_idx, store_columns, template_file, 
         letter = get_column_letter(col_num)
         ws[f"{letter}6"] = f"=SUM({letter}2:{letter}5)"
 
+    # G列之后的每列宽度与G列保持一致
+    g_width = ws.column_dimensions["G"].width
+    if g_width:
+        for col_num in range(8, last_col + 1):
+            ws.column_dimensions[get_column_letter(col_num)].width = g_width
+
     wb.save(output_file)
     return last_data_row
 
