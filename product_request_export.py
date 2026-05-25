@@ -1,5 +1,5 @@
 """
-Pospal 订货看板 - 自动导出脚本
+订货商品汇总看板 - 自动导出脚本
 =====================================
 依赖：playwright (Python)
 安装：pip install playwright && playwright install chromium
