@@ -155,8 +155,13 @@ def merge_into_template(data_rows, total_col_idx, store_columns, template_file, 
 
     last_data_row = DATA_START_ROW + len(data_rows) - 1
 
+    # 门店列 rows 2-5 统一赋值为 0
+    for col_num in range(7, last_col + 1):
+        for r in range(2, 6):
+            ws.cell(row=r, column=col_num).value = 0
+
     # 更新第6行门店列公式：统一格式 =SUM({col}2:{col}5)
-    for col_num in [7 + i for i in range(store_count)]:
+    for col_num in range(7, last_col + 1):
         letter = get_column_letter(col_num)
         ws[f"{letter}6"] = f"=SUM({letter}2:{letter}5)"
 
