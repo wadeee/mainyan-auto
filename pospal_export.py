@@ -16,12 +16,11 @@ Pospal 订货看板 - 自动导出脚本
 """
 
 import argparse
-import shutil
+import re
 import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from time import sleep
 
 # ─── 配置区（按需修改）─────────────────────────────────────────────────────────
 ACCOUNT = "huomimayzb"
@@ -44,14 +43,6 @@ TARGET_CATEGORIES = [
     "冷冻面团",
     "蛋糕及面包成品及饼干类",
 ]
-
-
-def js(page, script: str, desc: str = ""):
-    """执行 JS 并打印结果（便于调试）"""
-    result = page.evaluate(script)
-    tag = f"[{desc}] " if desc else ""
-    print(f"  {tag}→ {result}")
-    return result
 
 
 def set_date(page, placeholder: str, value: str):
@@ -105,12 +96,11 @@ def click_by_text(page, text: str, desc: str = ""):
 
 def login(page):
     """登录流程"""
-    print("\n[1/8] 打开登录页面...")
+    print("\n[1/4] 打开登录页面...")
     page.goto(LOGIN_URL)
     page.wait_for_load_state("networkidle")
 
-    print("[2/8] 切换到工号登录模式...")
-    # 工号登录按钮实际是 <span>，不是 <a>，用通用文本匹配
+    print("[2/4] 切换到工号登录模式...")
     page.evaluate("""
         (function() {
             var els = document.querySelectorAll('div,span,a,button');
@@ -140,7 +130,7 @@ def login(page):
         raise RuntimeError(f"工号登录切换失败，当前输入框：{placeholder}")
     print(f"  表单已切换 → {placeholder}")
 
-    print("[3/8] 填入账号/工号/密码...")
+    print("[3/4] 填入账号/工号/密码...")
     page.evaluate(f"""
         (function() {{
             var inputs = document.querySelectorAll('input');
@@ -161,7 +151,7 @@ def login(page):
 
     time.sleep(1.5)
 
-    print("[4/8] 点击登录按钮...")
+    print("[4/4] 点击登录按钮...")
     click_by_text(page, "登 录", "登录")
     page.wait_for_load_state("networkidle", timeout=30_000)
 
@@ -284,19 +274,15 @@ def setup_filters(page, target_date: str):
     time.sleep(0.5)
 
 
-def query_and_verify(page, target_date: str, max_retries: int = 3) -> int:
-    """
-    执行查询，并处理日期被重置的问题。
-    返回查询到的数据行数。
-    """
+def search_and_count_rows(page, target_date: str, btn_id: str, max_retries: int = 3) -> int:
+    """点击查询按钮，验证日期未被重置，返回结果行数。"""
     print("\n  [查询] 执行查询...")
 
     for attempt in range(1, max_retries + 1):
         print(f"  查询第 {attempt} 次...")
-        page.evaluate("document.getElementById('btnLoadRequestList').click()")
+        page.evaluate(f"document.getElementById('{btn_id}').click()")
         page.wait_for_load_state("networkidle", timeout=90_000)
 
-        # 验证日期和行数
         result = page.evaluate("""
             (function() {
                 var rows = document.querySelectorAll('table tbody tr');
@@ -309,11 +295,7 @@ def query_and_verify(page, target_date: str, max_retries: int = 3) -> int:
         """)
         print(f"    结果: {result}")
 
-        # sleep(30)
-
         if target_date in result:
-            # 日期正确，提取行数
-            import re
             m = re.search(r"rows:(\d+)", result)
             row_count = int(m.group(1)) if m else 0
             print(f"  ✅ 查询成功，共 {row_count} 行数据")
@@ -322,60 +304,16 @@ def query_and_verify(page, target_date: str, max_retries: int = 3) -> int:
             print(f"  ⚠️  日期被重置！重新设置日期...")
             set_date(page, "开始日期", f"{target_date} 00:00")
             set_date(page, "结束日期", f"{target_date} 23:59")
-            verify_dates(page, target_date)
-
-    raise RuntimeError(f"查询 {max_retries} 次后日期仍然不正确，请手动检查")
-
-def query_and_verify_item_board(page, target_date: str, max_retries: int = 3) -> int:
-    """
-    执行查询，并处理日期被重置的问题。
-    返回查询到的数据行数。
-    """
-    print("\n  [查询] 执行查询...")
-
-    for attempt in range(1, max_retries + 1):
-        print(f"  查询第 {attempt} 次...")
-        page.evaluate("document.getElementById('btnList').click()")
-        page.wait_for_load_state("networkidle", timeout=90_000)
-
-        # 验证日期和行数
-        result = page.evaluate("""
-            (function() {
-                var rows = document.querySelectorAll('table tbody tr');
-                var r = 'rows:' + rows.length + ' | ';
-                document.querySelectorAll('input.timeInput.hasDatepicker').forEach(function(inp) {
-                    r += inp.placeholder + '=' + inp.value + ' | ';
-                });
-                return r;
-            })()
-        """)
-        print(f"    结果: {result}")
-
-        # sleep(30)
-
-        if target_date in result:
-            # 日期正确，提取行数
-            import re
-            m = re.search(r"rows:(\d+)", result)
-            row_count = int(m.group(1)) if m else 0
-            print(f"  ✅ 查询成功，共 {row_count} 行数据")
-            return row_count
-        else:
-            print(f"  ⚠️  日期被重置！重新设置日期...")
-            set_date(page, "开始日期", f"{target_date} 00:00")
-            set_date(page, "结束日期", f"{target_date} 23:59")
-            verify_dates(page, target_date)
+            if not verify_dates(page, target_date):
+                print("  ⚠️  日期验证失败")
 
     raise RuntimeError(f"查询 {max_retries} 次后日期仍然不正确，请手动检查")
 
 
-def export_and_save(page, target_date: str, file_prefix: str = "订货商品汇总看板") -> Path:
-    """
-    点击导出，等待下载，并将文件保存到输出目录。
-    返回最终保存的文件路径。
-    """
+def export_and_save(page, target_date: str, file_prefix: str) -> Path:
+    """点击导出，等待下载，保存到输出目录，返回文件路径。"""
     print("\n  [导出] 导出文件...")
-    time.sleep(3)  # 确保导出按钮就绪
+    time.sleep(3)
 
     # 格式化日期并创建目标文件夹
     date_str = target_date.replace(".", "-")  # 2026.05.25 → 2026-05-25
@@ -405,16 +343,7 @@ def export_and_save(page, target_date: str, file_prefix: str = "订货商品汇�
     suggested = download.suggested_filename
     print(f"  下载文件名: {suggested}")
 
-    # 目标路径
     dest = daily_output_dir / f"{file_prefix}_{date_str}.xlsx"
-
-    # 如果目标文件被 Excel 占用，用 _v2 后缀
-    # if dest.exists():
-    #     try:
-    #         dest.unlink()
-    #     except PermissionError:
-    #         dest = daily_output_dir / f"订货商品汇总看板_{date_str}_v2.xlsx"
-    #         print(f"  ⚠️  原文件被占用，改用: {dest.name}")
 
     download.save_as(dest)
     print(f"  ✅ 已保存到: {dest}")
@@ -456,7 +385,6 @@ def main():
         )
         context = browser.new_context(
             viewport={"width": 1600, "height": 900},
-            # 设置下载行为：允许下载
             accept_downloads=True,
         )
         page = context.new_page()
@@ -471,7 +399,7 @@ def main():
 
             navigate_to_board(page, SUMMARY_BOARD_URL, "订货商品汇总看板")
             setup_filters(page, target_date)
-            summary_row_count = query_and_verify(page, target_date)
+            summary_row_count = search_and_count_rows(page, target_date, "btnLoadRequestList")
             summary_path = export_and_save(page, target_date, "订货商品汇总看板")
 
             # ── 任务 2：订货商品明细看板 ──────────────────────────────────
@@ -481,7 +409,7 @@ def main():
 
             navigate_to_board(page, ITEM_BOARD_URL, "订货商品明细看板")
             setup_filters(page, target_date)
-            item_row_count = query_and_verify_item_board(page, target_date)
+            item_row_count = search_and_count_rows(page, target_date, "btnList")
             item_path = export_and_save(page, target_date, "订货商品明细看板")
 
             print(f"\n{'=' * 55}")
