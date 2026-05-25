@@ -1,12 +1,12 @@
 """
-订货商品汇总看板 - 自动导出脚本
+订货商品汇总看板 - 自动导出 & 格式化脚本
 =====================================
-依赖：playwright (Python)
-安装：pip install playwright && playwright install chromium
+依赖：pip install playwright openpyxl && playwright install chromium
 
 自动登录后依次导出：
   1. 订货商品汇总看板 (ProductRequestSummaryBoard)
   2. 订货商品明细看板 (ProductRequestItemBoard)
+  3. 将下载数据填入格式模板，生成格式化汇总看板
 
 用法：
     python product_request_export.py                    # 导出后天的数据
@@ -16,11 +16,15 @@
 """
 
 import argparse
+import copy
 import re
 import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 # ─── 配置区（按需修改）─────────────────────────────────────────────────────────
 ACCOUNT = "huomimayzb"
@@ -32,6 +36,7 @@ SUMMARY_BOARD_URL = "https://css69.pospal.cn/ChainStoreSupplySeller/ProductReque
 ITEM_BOARD_URL = "https://css69.pospal.cn/ChainStoreSupplySeller/ProductRequestItemBoard"
 
 OUTPUT_DIR = Path.home() / "Desktop" / "订货商品汇总看板"
+TEMPLATE_FILE = Path(__file__).resolve().parent / "订货商品汇总看板_格式化模板.xlsx"
 
 STATUS_OPTIONS = [
     "待审核",
@@ -53,6 +58,226 @@ TARGET_CATEGORIES = [
     "冷冻面团",
     "蛋糕及面包成品及饼干类",
 ]
+
+# ─── 格式化模板配置 ──────────────────────────────────────────────────────────
+ROW_CATEGORY_MAP = {
+    2: ["冷冻面团"],
+    3: ["蛋糕类", "成品面包类", "饼干类"],
+    4: ["专版包材类", "公版包材类", "工衣工帽围裙", "模具", "保洁用品", "饼干类/外", "慕斯类/外", "饮品类/外",
+        "其他/外", "热销类", "冷冻馅料类", "肉类", "油脂类", "冷藏馅料类", "粉类", "糖类", "常温馅料类", "干果类"],
+    5: ["配送费"],
+}
+
+SAMPLE_ROW_START = 8
+SAMPLE_ROW_COUNT = 2
+DATA_START_ROW = 8
+HEADER_ROW = 7
+TOTAL_ORDER_HEADER = "合计订货量"
+
+FIXED_COLUMN_MAP = [
+    (1, 2),  # 商品分类 -> B
+    (3, 3),  # 商品名称 -> C
+    (4, 4),  # 规格 -> D
+    (5, 5),  # 单位 -> E
+]
+
+
+# ─── 格式化合并函数 ──────────────────────────────────────────────────────────
+
+
+def copy_cell_style(src_cell, dst_cell):
+    if src_cell.has_style:
+        dst_cell.font = copy.copy(src_cell.font)
+        dst_cell.fill = copy.copy(src_cell.fill)
+        dst_cell.border = copy.copy(src_cell.border)
+        dst_cell.alignment = copy.copy(src_cell.alignment)
+        dst_cell.number_format = src_cell.number_format
+
+
+def compute_category_sums(detail_file: Path, store_names: set[str]) -> dict:
+    wb = load_workbook(detail_file, data_only=True)
+    ws = wb.active
+
+    cat_to_row = {}
+    for row_num, categories in ROW_CATEGORY_MAP.items():
+        for cat in categories:
+            cat_to_row[cat] = row_num
+
+    sums: dict[tuple[int, str], float] = {}
+    for row in ws.iter_rows(min_row=2):
+        category = row[1].value   # B列：商品分类
+        org = row[5].value        # F列：订货组织
+        amount = row[13].value    # N列：订货金额
+
+        if category is None or org is None or amount is None:
+            continue
+
+        category_str = str(category).strip()
+        org_str = str(org).strip()
+
+        row_num = cat_to_row.get(category_str)
+        if row_num is None:
+            continue
+        if org_str not in store_names:
+            continue
+
+        key = (row_num, org_str)
+        sums[key] = sums.get(key, 0) + float(amount)
+
+    wb.close()
+    return sums
+
+
+def read_data_file(data_file: Path):
+    wb = load_workbook(data_file)
+    ws = wb.active
+
+    headers = [cell.value for cell in list(ws.iter_rows(min_row=1, max_row=1))[0]]
+
+    total_col_idx = None
+    for i, h in enumerate(headers):
+        if h and TOTAL_ORDER_HEADER in str(h):
+            total_col_idx = i
+            break
+    if total_col_idx is None:
+        raise ValueError(f"数据源中找不到'{TOTAL_ORDER_HEADER}'列")
+
+    store_columns = []
+    for i in range(total_col_idx + 1, len(headers)):
+        if headers[i] is not None and str(headers[i]).strip():
+            store_columns.append((i, str(headers[i]).strip()))
+
+    rows = []
+    for row in ws.iter_rows(min_row=2):
+        vals = [cell.value for cell in row]
+        if any(v is not None and str(v).strip() != "" for v in vals):
+            rows.append(vals)
+
+    return total_col_idx, store_columns, rows
+
+
+def merge_into_template(data_rows, total_col_idx, store_columns, template_file, output_file,
+                        category_sums=None):
+    wb = load_workbook(template_file)
+    ws = wb.active
+
+    store_count = len(store_columns)
+    last_col = 6 + store_count
+    template_max_col = ws.max_column
+
+    column_map = list(FIXED_COLUMN_MAP)
+    column_map.append((total_col_idx, 6))
+    for offset, (src_idx, _) in enumerate(store_columns):
+        column_map.append((src_idx, 7 + offset))
+
+    for offset, (_, name) in enumerate(store_columns):
+        ws.cell(row=HEADER_ROW, column=7 + offset).value = name
+
+    for col in range(last_col + 1, template_max_col + 1):
+        for row in range(1, ws.max_row + 1):
+            cell = ws.cell(row=row, column=col)
+            cell.value = None
+            cell.font = copy.copy(cell.font)
+            cell.border = copy.copy(cell.border)
+
+    if last_col > template_max_col:
+        for row in range(1, ws.max_row + 1):
+            src = ws.cell(row=row, column=template_max_col)
+            for new_col in range(template_max_col + 1, last_col + 1):
+                copy_cell_style(src, ws.cell(row=row, column=new_col))
+
+    first_store = get_column_letter(7)
+    last_store = get_column_letter(last_col)
+    for r in range(2, 6):
+        ws.cell(row=r, column=6).value = f"=SUM({first_store}{r}:{last_store}{r})"
+    ws.cell(row=6, column=6).value = f"=SUM({first_store}6:{last_store}6)"
+
+    sample_cells = list(ws.iter_rows(
+        min_row=SAMPLE_ROW_START,
+        max_row=SAMPLE_ROW_START
+    ))[0]
+
+    ws.delete_rows(SAMPLE_ROW_START, SAMPLE_ROW_COUNT)
+    ws.insert_rows(DATA_START_ROW, len(data_rows))
+
+    for i, row_data in enumerate(data_rows):
+        excel_row = DATA_START_ROW + i
+        ws.cell(row=excel_row, column=1).value = f"=ROW()-{HEADER_ROW}"
+
+        for src_idx, dst_col in column_map:
+            value = row_data[src_idx] if src_idx < len(row_data) else None
+            ws.cell(row=excel_row, column=dst_col).value = value
+
+        for col_idx in range(1, last_col + 1):
+            if col_idx <= len(sample_cells):
+                src = sample_cells[col_idx - 1]
+            else:
+                src = sample_cells[len(sample_cells) - 1]
+            copy_cell_style(src, ws.cell(row=excel_row, column=col_idx))
+
+    last_data_row = DATA_START_ROW + len(data_rows) - 1
+
+    for offset, (_, store_name) in enumerate(store_columns):
+        col_num = 7 + offset
+        for r in range(2, 6):
+            if category_sums:
+                ws.cell(row=r, column=col_num).value = category_sums.get((r, store_name), 0)
+            else:
+                ws.cell(row=r, column=col_num).value = 0
+
+    for col_num in range(7, last_col + 1):
+        letter = get_column_letter(col_num)
+        ws[f"{letter}6"] = f"=SUM({letter}2:{letter}5)"
+
+    g_width = ws.column_dimensions["G"].width
+    if g_width:
+        for col_num in range(8, last_col + 1):
+            ws.column_dimensions[get_column_letter(col_num)].width = g_width
+
+    wb.save(output_file)
+    return last_data_row
+
+
+def merge_board(data_file: Path, detail_file: Path, template_file: Path, output_file: Path):
+    print(f"数据源: {data_file}")
+    print(f"明细  : {detail_file}")
+    print(f"模板  : {template_file}")
+    print(f"输出  : {output_file}")
+    print()
+
+    if not data_file.exists():
+        raise FileNotFoundError(f"数据源文件不存在: {data_file}")
+    if not template_file.exists():
+        raise FileNotFoundError(f"模板文件不存在: {template_file}")
+
+    print("读取数据源...")
+    total_col_idx, store_columns, data_rows = read_data_file(data_file)
+    print(f"  共 {len(data_rows)} 行数据")
+    print(f"  合计订货量列: {get_column_letter(total_col_idx + 1)} (索引 {total_col_idx})")
+    print(f"  门店列 ({len(store_columns)}): {', '.join(name for _, name in store_columns)}")
+
+    category_sums = {}
+    if detail_file.exists():
+        store_names = {name for _, name in store_columns}
+        print("读取明细数据，计算分类汇总金额...")
+        category_sums = compute_category_sums(detail_file, store_names)
+        for (r, store), val in sorted(category_sums.items()):
+            print(f"  Row {r} / {store}: {val}")
+    else:
+        print(f"  明细文件不存在，汇总区将填入 0: {detail_file}")
+
+    print("填入模板...")
+    last_row = merge_into_template(data_rows, total_col_idx, store_columns, template_file, output_file,
+                                   category_sums)
+    last_letter = get_column_letter(6 + len(store_columns))
+    print(f"  数据区: A{DATA_START_ROW}:{last_letter}{last_row}")
+
+    print()
+    print(f"已生成: {output_file}")
+    return output_file
+
+
+# ─── 浏览器自动化函数 ────────────────────────────────────────────────────────
 
 
 def set_date(page, placeholder: str, value: str):
@@ -434,9 +659,23 @@ def main():
             item_path = export_and_save(page, target_date, "订货商品明细看板")
 
             print(f"\n{'=' * 55}")
-            print(f"  ✅ 全部完成！")
+            print(f"  ✅ 下载完成！")
             print(f"  订货商品汇总看板：{summary_row_count} 行 → {summary_path}")
             print(f"  订货商品明细看板：{item_row_count} 行 → {item_path}")
+            print(f"{'=' * 55}\n")
+
+            # ── 任务 3：格式化输出 ──
+            print(f"{'─' * 55}")
+            print(f"  任务 3/3：生成格式化汇总看板")
+            print(f"{'─' * 55}\n")
+
+            date_str = target_date.replace(".", "-")
+            output_file = OUTPUT_DIR / date_str / f"订货商品汇总看板_格式化_{date_str}.xlsx"
+
+            merge_board(summary_path, item_path, TEMPLATE_FILE, output_file)
+
+            print(f"\n{'=' * 55}")
+            print(f"  ✅ 全部完成！")
             print(f"{'=' * 55}\n")
 
         except Exception as e:
