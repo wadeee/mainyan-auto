@@ -56,7 +56,7 @@ LOGIN_URL = "https://beta69.pospal.cn/"
 SUMMARY_BOARD_URL = "https://css69.pospal.cn/ChainStoreSupplySeller/ProductRequestSummaryBoard"
 ITEM_BOARD_URL = "https://css69.pospal.cn/ChainStoreSupplySeller/ProductRequestItemBoard"
 
-OUTPUT_DIR = Path.home() / "Desktop" / "订货商品汇总看板"
+OUTPUT_DIR = Path(__file__).resolve().parent / "订货商品汇总看板"
 TEMPLATE_FILE = Path(__file__).resolve().parent / "订货商品汇总看板_格式化模板.xlsx"
 
 STATUS_OPTIONS = [
