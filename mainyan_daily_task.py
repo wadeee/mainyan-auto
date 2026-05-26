@@ -2,6 +2,7 @@ import logging
 import logging.handlers
 import schedule
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -28,7 +29,7 @@ def run_task(days):
     logger.info(f"开始执行任务: days={days}")
     try:
         result = subprocess.run(
-            [r"C:\Users\Wadec\AppData\Local\Programs\Python\Python311\python.exe", Path(__file__).resolve().parent / "product_request_export.py", "--headless", f"--days={days}"],
+            [sys.executable, Path(__file__).resolve().parent / "product_request_export.py", "--headless", f"--days={days}"],
             timeout=1800,
             capture_output=True,
         )

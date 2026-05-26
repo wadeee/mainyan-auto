@@ -85,6 +85,24 @@ for /f "tokens=*" %%v in ('!PYTHON_CMD! --version 2^>^&1') do set "PY_VER=%%v"
 echo 已找到: !PY_VER!  (命令: !PYTHON_CMD!)
 
 :: ------------------------------------------------
+:: 1.5. 生成 config.env（记录当前机器的绝对路径）
+:: ------------------------------------------------
+echo.
+echo [1.5/5] 生成 config.env...
+
+for /f "tokens=*" %%p in ('!PYTHON_CMD! -c "import sys; print(sys.executable)"') do set "PYTHON_FULL_PATH=%%p"
+set "PW_BROWSERS=%LOCALAPPDATA%\ms-playwright"
+
+(
+    echo PYTHON_PATH=!PYTHON_FULL_PATH!
+    echo PLAYWRIGHT_BROWSERS_PATH=!PW_BROWSERS!
+) > "%~dp0config.env"
+
+echo   PYTHON_PATH=!PYTHON_FULL_PATH!
+echo   PLAYWRIGHT_BROWSERS_PATH=!PW_BROWSERS!
+echo   已写入: %~dp0config.env
+
+:: ------------------------------------------------
 :: 2. 升级 pip
 :: ------------------------------------------------
 echo.

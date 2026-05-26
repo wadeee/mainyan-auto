@@ -31,7 +31,7 @@ echo.
 :: 2. 安装并启动 mainyan_daily_task 服务
 :: ------------------------------------------------
 echo [2/2] 安装并启动 mainyan_daily_task 服务...
-nssm install mainyan_daily_task "C:\mainyan-auto\mainyan_daily_task.bat"
+nssm install mainyan_daily_task "%~dp0mainyan_daily_task.bat"
 if %errorlevel% neq 0 (
     echo 服务安装失败！请确认 nssm 已正确安装。
     pause
