@@ -17,6 +17,8 @@
 
 import argparse
 import copy
+import logging
+import logging.handlers
 import re
 import sys
 import time
@@ -25,6 +27,25 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
+
+# ─── 日志配置 ───────────────────────────────────────────────────────────────────
+LOG_DIR = Path(__file__).resolve().parent / "log"
+LOG_DIR.mkdir(exist_ok=True)
+
+_file_handler = logging.handlers.TimedRotatingFileHandler(
+    LOG_DIR / "product_request_export.log",
+    when="midnight",
+    backupCount=30,
+    encoding="utf-8",
+)
+_file_handler.suffix = "%Y-%m-%d"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[_file_handler, logging.StreamHandler()],
+)
+logger = logging.getLogger(__name__)
 
 # ─── 配置区（按需修改）─────────────────────────────────────────────────────────
 ACCOUNT = "huomimayzb"
@@ -257,41 +278,38 @@ def merge_into_template(data_rows, total_col_idx, store_columns, template_file, 
 
 def merge_board(data_file: Path, detail_file: Path, template_file: Path, output_file: Path,
                 target_date=None):
-    print(f"数据源: {data_file}")
-    print(f"明细  : {detail_file}")
-    print(f"模板  : {template_file}")
-    print(f"输出  : {output_file}")
-    print()
+    logger.info(f"数据源: {data_file}")
+    logger.info(f"明细  : {detail_file}")
+    logger.info(f"模板  : {template_file}")
+    logger.info(f"输出  : {output_file}")
 
     if not data_file.exists():
         raise FileNotFoundError(f"数据源文件不存在: {data_file}")
     if not template_file.exists():
         raise FileNotFoundError(f"模板文件不存在: {template_file}")
 
-    print("读取数据源...")
+    logger.info("读取数据源...")
     total_col_idx, store_columns, data_rows = read_data_file(data_file)
-    print(f"  共 {len(data_rows)} 行数据")
-    print(f"  合计订货量列: {get_column_letter(total_col_idx + 1)} (索引 {total_col_idx})")
-    print(f"  门店列 ({len(store_columns)}): {', '.join(name for _, name in store_columns)}")
+    logger.info(f"  共 {len(data_rows)} 行数据")
+    logger.info(f"  合计订货量列: {get_column_letter(total_col_idx + 1)} (索引 {total_col_idx})")
+    logger.info(f"  门店列 ({len(store_columns)}): {', '.join(name for _, name in store_columns)}")
 
     category_sums = {}
     if detail_file.exists():
         store_names = {name for _, name in store_columns}
-        print("读取明细数据，计算分类汇总金额...")
+        logger.info("读取明细数据，计算分类汇总金额...")
         category_sums = compute_category_sums(detail_file, store_names)
         for (r, store), val in sorted(category_sums.items()):
-            print(f"  Row {r} / {store}: {val}")
+            logger.info(f"  Row {r} / {store}: {val}")
     else:
-        print(f"  明细文件不存在，汇总区将填入 0: {detail_file}")
+        logger.info(f"  明细文件不存在，汇总区将填入 0: {detail_file}")
 
-    print("填入模板...")
+    logger.info("填入模板...")
     last_row = merge_into_template(data_rows, total_col_idx, store_columns, template_file, output_file,
                                    category_sums, target_date=target_date)
     last_letter = get_column_letter(6 + len(store_columns))
-    print(f"  数据区: A{DATA_START_ROW}:{last_letter}{last_row}")
-
-    print()
-    print(f"已生成: {output_file}")
+    logger.info(f"  数据区: A{DATA_START_ROW}:{last_letter}{last_row}")
+    logger.info(f"已生成: {output_file}")
     return output_file
 
 
@@ -324,7 +342,7 @@ def verify_dates(page, expected_date: str) -> bool:
             return r.join(' | ');
         })()
     """)
-    print(f"  [日期验证] {result}")
+    logger.info(f"  [日期验证] {result}")
     return expected_date in result and result.count(expected_date) == 2
 
 
@@ -343,17 +361,17 @@ def click_by_text(page, text: str, desc: str = ""):
         }})()
     """)
     tag = f"[{desc}] " if desc else ""
-    print(f"  {tag}→ {result}")
+    logger.info(f"  {tag}→ {result}")
     return "clicked" in result
 
 
 def login(page):
     """登录流程"""
-    print("\n[1/4] 打开登录页面...")
+    logger.info("\n[1/4] 打开登录页面...")
     page.goto(LOGIN_URL)
     page.wait_for_load_state("networkidle")
 
-    print("[2/4] 切换到工号登录模式...")
+    logger.info("[2/4] 切换到工号登录模式...")
     page.evaluate("""
         (function() {
             var els = document.querySelectorAll('div,span,a,button');
@@ -380,9 +398,9 @@ def login(page):
     """)
     if "员工工号" not in placeholder:
         raise RuntimeError(f"工号登录切换失败，当前输入框：{placeholder}")
-    print(f"  表单已切换 → {placeholder}")
+    logger.info(f"  表单已切换 → {placeholder}")
 
-    print("[3/4] 填入账号/工号/密码...")
+    logger.info("[3/4] 填入账号/工号/密码...")
     page.evaluate(f"""
         (function() {{
             var inputs = document.querySelectorAll('input');
@@ -402,7 +420,7 @@ def login(page):
 
     time.sleep(1.5)
 
-    print("[4/4] 点击登录按钮...")
+    logger.info("[4/4] 点击登录按钮...")
     click_by_text(page, "登 录", "登录")
     page.wait_for_load_state("networkidle", timeout=30_000)
 
@@ -411,18 +429,18 @@ def login(page):
 
 def navigate_to_board(page, board_url: str, board_name: str):
     """导航到指定看板"""
-    print(f"\n  [导航] 前往{board_name}...")
+    logger.info(f"\n  [导航] 前往{board_name}...")
     page.goto(board_url)
     page.wait_for_load_state("networkidle", timeout=30_000)
-    print(f"  已到达 → {page.url}")
+    logger.info(f"  已到达 → {page.url}")
 
 
 def setup_filters(page, target_date: str, *, select_status: bool = False):
     """设置筛选条件：期望到货时间、商品分类、日期范围，可选单据状态"""
-    print("\n  [筛选] 设置筛选条件...")
+    logger.info("\n  [筛选] 设置筛选条件...")
 
     # ── 1. 切换日期类型标签 ──
-    print("  → 切换到「期望到货时间」标签...")
+    logger.info("  → 切换到「期望到货时间」标签...")
     result = page.evaluate("""
         (function() {
             var lis = document.querySelectorAll('li');
@@ -435,7 +453,7 @@ def setup_filters(page, target_date: str, *, select_status: bool = False):
             return 'not found';
         })()
     """)
-    print(f"    {result}")
+    logger.info(f"    {result}")
     if result == "not found":
         raise RuntimeError("未找到「期望到货时间」标签")
 
@@ -451,18 +469,18 @@ def setup_filters(page, target_date: str, *, select_status: bool = False):
             return r.join(' | ');
         })()
     """)
-    print(f"    标签状态: {tab_status}")
+    logger.info(f"    标签状态: {tab_status}")
 
     # ── 2. 展开高级搜索，选择商品分类 ──
-    print("  → 展开高级搜索面板...")
+    logger.info("  → 展开高级搜索面板...")
     page.evaluate("document.getElementById('advancedBtn').click()")
     time.sleep(0.5)
 
-    print("  → 打开分类选择弹框...")
+    logger.info("  → 打开分类选择弹框...")
     page.evaluate("document.getElementById('selectCategory').click()")
     time.sleep(1.0)
 
-    print(f"  → 勾选 {len(TARGET_CATEGORIES)} 个分类...")
+    logger.info(f"  → 勾选 {len(TARGET_CATEGORIES)} 个分类...")
     categories_js = str(TARGET_CATEGORIES).replace("'", '"')
     page.evaluate(f"""
         (function() {{
@@ -491,9 +509,9 @@ def setup_filters(page, target_date: str, *, select_status: bool = False):
             return r.join(' | ');
         }})()
     """)
-    print(f"    勾选验证: {check_result}")
+    logger.info(f"    勾选验证: {check_result}")
     if "false" in check_result or check_result.count(":true") < len(TARGET_CATEGORIES):
-        print("  ⚠️  部分分类未勾选，尝试重试...")
+        logger.warning("部分分类未勾选，尝试重试...")
         page.evaluate(f"""
             (function() {{
                 var targets = {categories_js};
@@ -507,13 +525,13 @@ def setup_filters(page, target_date: str, *, select_status: bool = False):
             }})()
         """)
 
-    print("  → 点击「确定」关闭弹框...")
+    logger.info("  → 点击「确定」关闭弹框...")
     click_by_text(page, "确定", "确定弹框")
     time.sleep(0.5)
 
     # ── 3. 选择单据状态（仅明细看板）──
     if select_status:
-        print("  → 选择单据状态...")
+        logger.info("  → 选择单据状态...")
         page.evaluate("""
             (function() {
                 var el = document.getElementById('ddl_productRequestStatus');
@@ -538,17 +556,17 @@ def setup_filters(page, target_date: str, *, select_status: bool = False):
         time.sleep(1.0)
 
     # ── 4. 设置日期范围 ──
-    print(f"  → 设置日期: {target_date}...")
+    logger.info(f"  → 设置日期: {target_date}...")
     set_date(page, "开始日期", f"{target_date} 00:00")
     set_date(page, "结束日期", f"{target_date} 23:59")
 
 
 def search_and_count_rows(page, target_date: str, btn_id: str, max_retries: int = 3) -> int:
     """点击查询按钮，验证日期未被重置，返回结果行数"""
-    print("\n  [查询] 执行查询...")
+    logger.info("\n  [查询] 执行查询...")
 
     for attempt in range(1, max_retries + 1):
-        print(f"  查询第 {attempt} 次...")
+        logger.info(f"  查询第 {attempt} 次...")
         page.evaluate(f"document.getElementById('{btn_id}').click()")
         page.wait_for_load_state("networkidle", timeout=90_000)
 
@@ -562,32 +580,32 @@ def search_and_count_rows(page, target_date: str, btn_id: str, max_retries: int 
                 return r;
             })()
         """)
-        print(f"    结果: {result}")
+        logger.info(f"    结果: {result}")
 
         if target_date in result:
             m = re.search(r"rows:(\d+)", result)
             row_count = int(m.group(1)) if m else 0
-            print(f"  ✅ 查询成功，共 {row_count} 行数据")
+            logger.info(f"  ✅ 查询成功，共 {row_count} 行数据")
             return row_count
         else:
-            print(f"  ⚠️  日期被重置！重新设置日期...")
+            logger.warning("日期被重置！重新设置日期...")
             set_date(page, "开始日期", f"{target_date} 00:00")
             set_date(page, "结束日期", f"{target_date} 23:59")
             if not verify_dates(page, target_date):
-                print("  ⚠️  日期验证失败")
+                logger.warning("日期验证失败")
 
     raise RuntimeError(f"查询 {max_retries} 次后日期仍然不正确，请手动检查")
 
 
 def export_and_save(page, target_date: str, file_prefix: str) -> Path:
     """点击导出，等待下载，保存到输出目录，返回文件路径"""
-    print("\n  [导出] 导出文件...")
+    logger.info("\n  [导出] 导出文件...")
     time.sleep(3)
 
     date_str = target_date.replace(".", "-")
     daily_output_dir = OUTPUT_DIR / date_str / "原始下载"
     daily_output_dir.mkdir(parents=True, exist_ok=True)
-    print(f"  → 输出至: {daily_output_dir}")
+    logger.info(f"  → 输出至: {daily_output_dir}")
 
     with page.expect_download(timeout=60_000) as dl_info:
         result = page.evaluate("""
@@ -602,16 +620,16 @@ def export_and_save(page, target_date: str, file_prefix: str) -> Path:
                 return 'not found';
             })()
         """)
-        print(f"  点击导出: {result}")
+        logger.info(f"  点击导出: {result}")
         if result == "not found":
             raise RuntimeError("未找到「导出」按钮")
 
     download = dl_info.value
-    print(f"  下载文件名: {download.suggested_filename}")
+    logger.info(f"  下载文件名: {download.suggested_filename}")
 
     dest = daily_output_dir / f"{file_prefix}_{date_str}.xlsx"
     download.save_as(dest)
-    print(f"  ✅ 已保存到: {dest}")
+    logger.info(f"  ✅ 已保存到: {dest}")
     return dest
 
 
@@ -628,18 +646,16 @@ def main():
         target_dt = datetime.now() + timedelta(days=args.days)
         target_date = target_dt.strftime("%Y.%m.%d")
 
-    print(f"{'=' * 55}")
-    print(f"  Pospal 订货看板导出")
-    print(f"  目标日期：{target_date}")
-    print(f"  输出根目录：{OUTPUT_DIR}")
-    print(f"{'=' * 55}")
+    logger.info(f"{'=' * 55}")
+    logger.info(f"  Pospal 订货看板导出")
+    logger.info(f"  目标日期：{target_date}")
+    logger.info(f"  输出根目录：{OUTPUT_DIR}")
+    logger.info(f"{'=' * 55}")
 
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        print("\n❌ 未安装 playwright，请先运行：")
-        print("   pip install playwright")
-        print("   playwright install chromium")
+        logger.error("未安装 playwright，请先运行: pip install playwright && playwright install chromium")
         sys.exit(1)
 
     with sync_playwright() as pw:
@@ -657,9 +673,9 @@ def main():
             login(page)
 
             # ── 任务 1：订货商品汇总看板 ──
-            print(f"\n{'─' * 55}")
-            print(f"  任务 1/2：订货商品汇总看板")
-            print(f"{'─' * 55}")
+            logger.info(f"\n{'─' * 55}")
+            logger.info(f"  任务 1/2：订货商品汇总看板")
+            logger.info(f"{'─' * 55}")
 
             navigate_to_board(page, SUMMARY_BOARD_URL, "订货商品汇总看板")
             setup_filters(page, target_date)
@@ -667,41 +683,41 @@ def main():
             summary_path = export_and_save(page, target_date, "订货商品汇总看板")
 
             # ── 任务 2：订货商品明细看板 ──
-            print(f"\n{'─' * 55}")
-            print(f"  任务 2/2：订货商品明细看板")
-            print(f"{'─' * 55}")
+            logger.info(f"\n{'─' * 55}")
+            logger.info(f"  任务 2/2：订货商品明细看板")
+            logger.info(f"{'─' * 55}")
 
             navigate_to_board(page, ITEM_BOARD_URL, "订货商品明细看板")
             setup_filters(page, target_date, select_status=True)
             item_row_count = search_and_count_rows(page, target_date, "btnList")
             item_path = export_and_save(page, target_date, "订货商品明细看板")
 
-            print(f"\n{'=' * 55}")
-            print(f"  ✅ 下载完成！")
-            print(f"  订货商品汇总看板：{summary_row_count} 行 → {summary_path}")
-            print(f"  订货商品明细看板：{item_row_count} 行 → {item_path}")
-            print(f"{'=' * 55}\n")
+            logger.info(f"\n{'=' * 55}")
+            logger.info(f"  ✅ 下载完成！")
+            logger.info(f"  订货商品汇总看板：{summary_row_count} 行 → {summary_path}")
+            logger.info(f"  订货商品明细看板：{item_row_count} 行 → {item_path}")
+            logger.info(f"{'=' * 55}\n")
 
             # ── 任务 3：格式化输出 ──
-            print(f"{'─' * 55}")
-            print(f"  任务 3/3：生成格式化汇总看板")
-            print(f"{'─' * 55}\n")
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  任务 3/3：生成格式化汇总看板")
+            logger.info(f"{'─' * 55}\n")
 
             date_str = target_date.replace(".", "-")
             output_file = OUTPUT_DIR / date_str / f"订货商品汇总看板_格式化_{date_str}.xlsx"
 
             merge_board(summary_path, item_path, TEMPLATE_FILE, output_file, target_date=target_date)
 
-            print(f"\n{'=' * 55}")
-            print(f"  ✅ 全部完成！")
-            print(f"{'=' * 55}\n")
+            logger.info(f"\n{'=' * 55}")
+            logger.info(f"  ✅ 全部完成！")
+            logger.info(f"{'=' * 55}\n")
 
         except Exception as e:
-            print(f"\n❌ 任务失败: {e}")
+            logger.error(f"任务失败: {e}")
             try:
                 screenshot = OUTPUT_DIR / "error_screenshot.png"
                 page.screenshot(path=str(screenshot))
-                print(f"  错误截图已保存: {screenshot}")
+                logger.info(f"  错误截图已保存: {screenshot}")
             except Exception:
                 pass
             raise
