@@ -83,9 +83,9 @@ TARGET_CATEGORIES = [
 # ─── 格式化模板配置 ──────────────────────────────────────────────────────────
 ROW_CATEGORY_MAP = {
     2: ["冷冻面团"],
-    3: ["蛋糕类", "成品面包类", "饼干类"],
-    4: ["专版包材类", "公版包材类", "工衣工帽围裙", "模具", "保洁用品", "饼干类/外", "慕斯类/外", "饮品类/外",
-        "其他/外", "热销类", "冷冻馅料类", "肉类", "油脂类", "冷藏馅料类", "粉类", "糖类", "常温馅料类", "干果类"],
+    3: ["成品面包类", "蛋糕类", "饼干类"],
+    4: ["热销类", "冷冻肉类", "冷冻馅料类", "冷藏馅料类", "油脂类", "粉类", "糖类", "常温馅料类", "干果类", "专版包材类",
+        "公版包材类", "工衣工帽围裙", "模具", "保洁用品", "饼干类/外", "慕斯类/外", "饮品类/外", "其他/外"],
     5: ["配送费"],
 }
 
@@ -218,10 +218,25 @@ def merge_into_template(data_rows, total_col_idx, store_columns, template_file, 
         max_row=SAMPLE_ROW_START
     ))[0]
 
+    # 创建分类优先级映射，按照ROW_CATEGORY_MAP中定义的顺序
+    category_priority = {}
+    priority = 0
+    for row_num, categories in ROW_CATEGORY_MAP.items():
+        for cat in categories:
+            category_priority[cat] = priority
+            priority += 1
+    
+    # 对数据行按照分类在ROW_CATEGORY_MAP中的顺序进行排序
+    def get_category_priority(row_data):
+        category = str(row_data[1]).strip() if row_data[1] is not None else ""
+        return category_priority.get(category, float('inf'))
+    
+    sorted_data_rows = sorted(data_rows, key=get_category_priority)
+    
     ws.delete_rows(SAMPLE_ROW_START, SAMPLE_ROW_COUNT)
-    ws.insert_rows(DATA_START_ROW, len(data_rows))
+    ws.insert_rows(DATA_START_ROW, len(sorted_data_rows))
 
-    for i, row_data in enumerate(data_rows):
+    for i, row_data in enumerate(sorted_data_rows):
         excel_row = DATA_START_ROW + i
         ws.cell(row=excel_row, column=1).value = f"=ROW()-{HEADER_ROW}"
 
