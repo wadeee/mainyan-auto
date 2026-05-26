@@ -28,7 +28,7 @@ def run_task(days):
     logger.info(f"开始执行任务: days={days}")
     try:
         result = subprocess.run(
-            ["python", r"C:\mainyan-auto\product_request_export.py", "--headless", f"--days={days}"],
+            [r"C:\Users\Wadec\AppData\Local\Programs\Python\Python311\python.exe", Path(__file__).resolve().parent / "product_request_export.py", "--headless", f"--days={days}"],
             timeout=1800,
         )
         if result.returncode != 0:
