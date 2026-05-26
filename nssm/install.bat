@@ -12,18 +12,18 @@ echo Running with administrative privileges.
 echo.
 
 :: 设置zip文件的相对路径
-set "ZIP_FILE=%~dp0nssm-2.24.zip"
+:: set "ZIP_FILE=%~dp0nssm-2.24.zip"
 
 :: 2. 解压文件到 C:\
-echo --- Unzipping %ZIP_FILE% to C:\ ---
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%ZIP_FILE%' -DestinationPath 'C:\' -Force"
-if %errorlevel% neq 0 (
-    echo ERROR: Failed to unzip the file. Make sure '%ZIP_FILE%' exists.
-    pause
-    exit /b
-)
-echo Unzip successful.
-echo.
+:: echo --- Unzipping %ZIP_FILE% to C:\ ---
+:: powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%ZIP_FILE%' -DestinationPath 'C:\' -Force"
+:: if %errorlevel% neq 0 (
+::     echo ERROR: Failed to unzip the file. Make sure '%ZIP_FILE%' exists.
+::     pause
+::     exit /b
+:: )
+:: echo Unzip successful.
+:: echo.
 
 :: 3. 根据操作系统架构确定正确的 nssm 目录
 IF EXIST "%ProgramFiles(x86)%" (
