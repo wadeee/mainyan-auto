@@ -21,12 +21,8 @@ REM ===============================
 set "PYTHON="
 
 for %%P in (
-    python
-    py
     "%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
-    "%LOCALAPPDATA%\Programs\Python\Python310\python.exe"
     "%ProgramFiles%\Python311\python.exe"
-    "%ProgramFiles%\Python310\python.exe"
 ) do (
     %%P --version >nul 2>&1
     if !errorlevel! == 0 (
