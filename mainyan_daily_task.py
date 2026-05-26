@@ -30,9 +30,12 @@ def run_task(days):
         result = subprocess.run(
             [r"C:\Users\Wadec\AppData\Local\Programs\Python\Python311\python.exe", Path(__file__).resolve().parent / "product_request_export.py", "--headless", f"--days={days}"],
             timeout=1800,
+            capture_output=True,
         )
         if result.returncode != 0:
-            logger.error(f"任务异常退出，返回码: {result.returncode}")
+            stderr_output = getattr(result, 'stderr', '无错误输出').decode('utf-8', errors='replace') if hasattr(result, 'stderr') and result.stderr else '无错误输出'
+            stdout_output = getattr(result, 'stdout', '无标准输出').decode('utf-8', errors='replace') if hasattr(result, 'stdout') and result.stdout else '无标准输出'
+            logger.error(f"任务异常退出，返回码: {result.returncode}, 标准输出: {stdout_output}, 错误输出: {stderr_output}")
         else:
             logger.info(f"任务完成: days={days}")
     except subprocess.TimeoutExpired:
