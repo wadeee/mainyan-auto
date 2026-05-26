@@ -1,6 +1,6 @@
 @echo off
 
-set SCRIPT=C:\Users\Wadec\Documents\projects\mainyan-autoproduct_request_export.py
+set SCRIPT=%~dp0product_request_export.py
 
 schtasks /create /f ^
   /tn "ProductExport_Days1" ^
