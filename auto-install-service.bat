@@ -22,6 +22,8 @@ echo.
 echo [1/2] 清理旧的 mainyan_daily_task 服务...
 nssm stop mainyan_daily_task >nul 2>&1
 nssm remove mainyan_daily_task confirm >nul 2>&1
+echo 等待服务完全卸载...
+timeout /t 3 /nobreak >nul 2>&1
 echo 旧服务已清理。
 echo.
 
