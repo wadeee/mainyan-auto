@@ -89,6 +89,14 @@ ROW_CATEGORY_MAP = {
     5: ["配送费"],
 }
 
+EXPORT_CATEGORY_MAP = {
+    "面团": ["冷冻面团"],
+    "成品面包饼干": ["成品面包类", "饼干类"],
+    "蛋糕": ["蛋糕类"],
+    "物料包材": ["热销类", "冷冻肉类", "冷冻馅料类", "冷藏馅料类", "油脂类", "粉类", "糖类", "常温馅料类", "干果类", "饼干类/外",
+         "慕斯类/外", "饮品类/外", "其他/外", "专版包材类", "公版包材类", "工衣工帽围裙", "模具", "保洁用品", "配送费"],
+}
+
 SAMPLE_ROW_START = 8
 SAMPLE_ROW_COUNT = 2
 DATA_START_ROW = 8
@@ -719,7 +727,7 @@ def main():
             logger.info(f"{'─' * 55}\n")
 
             date_str = target_date.replace(".", "-")
-            output_file = OUTPUT_DIR / date_str / f"订货商品汇总看板_格式化_{date_str}.xlsx"
+            output_file = OUTPUT_DIR / date_str / f"订货商品汇总看板_全部_{date_str}.xlsx"
 
             merge_board(summary_path, item_path, TEMPLATE_FILE, output_file, target_date=target_date)
 
