@@ -202,3 +202,5 @@ calibration_*.npy
 # Training logs
 args.yaml
 results.csv
+
+/订货商品汇总看板/
