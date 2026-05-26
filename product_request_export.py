@@ -242,11 +242,11 @@ def merge_into_template(data_rows, total_col_idx, store_columns, template_file, 
             if m:
                 cell.value = m.group(1)
 
-    # 保存前：更新 A2 和 C2 中的日期
+    # 保存前：更新 A6 和 C6 中的日期
     if target_date:
         target_dt = datetime.strptime(target_date, "%Y.%m.%d")
         prev_day = (target_dt - timedelta(days=2)).strftime("%Y.%m.%d")
-        for cell_ref, new_date in [("A2", prev_day), ("C2", target_date)]:
+        for cell_ref, new_date in [("A6", prev_day), ("C6", target_date)]:
             cell = ws[cell_ref]
             if cell.value:
                 cell.value = re.sub(r'\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}', new_date, str(cell.value))
