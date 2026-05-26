@@ -1,6 +1,6 @@
 @echo off
 
-set "SCRIPT=%~dp0mainyan_daily_task.py"
+set "SCRIPT=C:\mainyan-auto\mainyan_daily_task.py"
 set "PYTHON=%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
 
 "%PYTHON%" "%SCRIPT%"
