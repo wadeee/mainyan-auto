@@ -11,7 +11,7 @@ set "LOG_DIR=%SCRIPT_DIR%logs"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
 REM 时间戳（用于日志）
-for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value') do set dt=%%I
+for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMddHHmmss"') do set "dt=%%I"
 set "DATESTAMP=%dt:~0,8%"
 set "TIMESTAMP=%dt:~8,6%"
 
