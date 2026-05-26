@@ -157,6 +157,43 @@ def compute_category_sums(detail_file: Path, store_names: set[str]) -> dict:
     return sums
 
 
+def compute_detail_sums_by_category(detail_file: Path, store_names: set[str]) -> dict:
+    wb = load_workbook(detail_file, data_only=True)
+    ws = wb.active
+    sums: dict[tuple[str, str], float] = {}
+    for row in ws.iter_rows(min_row=2):
+        category = row[1].value
+        org = row[5].value
+        amount = row[13].value
+        if category is None or org is None or amount is None:
+            continue
+        cat_str = str(category).strip()
+        org_str = str(org).strip()
+        if org_str not in store_names:
+            continue
+        key = (cat_str, org_str)
+        sums[key] = sums.get(key, 0) + float(amount)
+    wb.close()
+    return sums
+
+
+def aggregate_to_row_sums(detail_sums: dict, allowed_categories: set[str] | None) -> dict:
+    cat_to_row = {}
+    for row_num, categories in ROW_CATEGORY_MAP.items():
+        for cat in categories:
+            cat_to_row[cat] = row_num
+    sums: dict[tuple[int, str], float] = {}
+    for (cat, store), amount in detail_sums.items():
+        if allowed_categories is not None and cat not in allowed_categories:
+            continue
+        row_num = cat_to_row.get(cat)
+        if row_num is None:
+            continue
+        key = (row_num, store)
+        sums[key] = sums.get(key, 0) + amount
+    return sums
+
+
 def read_data_file(data_file: Path):
     wb = load_workbook(data_file)
     ws = wb.active
@@ -721,15 +758,51 @@ def main():
             logger.info(f"  订货商品明细看板：{item_row_count} 行 → {item_path}")
             logger.info(f"{'=' * 55}\n")
 
-            # ── 任务 3：格式化输出 ──
+            # ── 任务 3：格式化输出（按分类分表）──
             logger.info(f"{'─' * 55}")
-            logger.info(f"  任务 3/3：生成格式化汇总看板")
+            logger.info(f"  任务 3/3：生成格式化汇总看板（{len(EXPORT_CATEGORY_MAP)} 个分表）")
             logger.info(f"{'─' * 55}\n")
 
             date_str = target_date.replace(".", "-")
-            output_file = OUTPUT_DIR / date_str / f"订货商品汇总看板_全部_{date_str}.xlsx"
 
-            merge_board(summary_path, item_path, TEMPLATE_FILE, output_file, target_date=target_date)
+            logger.info("读取汇总数据源...")
+            total_col_idx, store_columns, data_rows = read_data_file(summary_path)
+            store_names = {name for _, name in store_columns}
+            logger.info(f"  共 {len(data_rows)} 行，{len(store_columns)} 个门店")
+
+            detail_sums = {}
+            if item_path.exists():
+                logger.info("读取明细数据，按分类汇总金额...")
+                detail_sums = compute_detail_sums_by_category(item_path, store_names)
+
+            all_category_sums = aggregate_to_row_sums(detail_sums, None)
+            all_output = OUTPUT_DIR / date_str / f"订货商品汇总看板_格式化_全部_{date_str}.xlsx"
+            merge_into_template(
+                data_rows, total_col_idx, store_columns,
+                TEMPLATE_FILE, all_output, all_category_sums,
+                target_date=target_date,
+            )
+            logger.info(f"  [全部] {len(data_rows)} 行 → {all_output}")
+
+            for export_name, export_cats in EXPORT_CATEGORY_MAP.items():
+                export_cat_set = set(export_cats)
+                filtered_rows = [
+                    row for row in data_rows
+                    if row[1] is not None and str(row[1]).strip() in export_cat_set
+                ]
+                logger.info(f"\n  [{export_name}] 匹配 {len(filtered_rows)} 行")
+                if not filtered_rows:
+                    logger.info(f"  [{export_name}] 无数据，跳过")
+                    continue
+
+                category_sums = aggregate_to_row_sums(detail_sums, export_cat_set)
+                output_file = OUTPUT_DIR / date_str / f"订货商品汇总看板_{export_name}_{date_str}.xlsx"
+                merge_into_template(
+                    filtered_rows, total_col_idx, store_columns,
+                    TEMPLATE_FILE, output_file, category_sums,
+                    target_date=target_date,
+                )
+                logger.info(f"  [{export_name}] → {output_file}")
 
             logger.info(f"\n{'=' * 55}")
             logger.info(f"  ✅ 全部完成！")
