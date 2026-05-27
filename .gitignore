@@ -204,5 +204,6 @@ args.yaml
 results.csv
 
 /订货商品汇总看板/
+/大客户订购商品统计表/
 /log/
 config.env
