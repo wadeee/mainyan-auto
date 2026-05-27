@@ -288,6 +288,13 @@ def merge_into_template(data_rows, total_col_idx, store_columns, template_file, 
 
         for src_idx, dst_col in column_map:
             value = row_data[src_idx] if src_idx < len(row_data) else None
+            if dst_col >= 6 and value is not None:
+                try:
+                    value = float(value)
+                    if value == int(value):
+                        value = int(value)
+                except (ValueError, TypeError):
+                    pass
             ws.cell(row=excel_row, column=dst_col).value = value
 
         for col_idx in range(1, last_col + 1):
