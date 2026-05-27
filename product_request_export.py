@@ -262,6 +262,7 @@ def merge_into_template(data_rows, total_col_idx, store_columns, template_file, 
         min_row=SAMPLE_ROW_START,
         max_row=SAMPLE_ROW_START
     ))[0]
+    sample_row_height = ws.row_dimensions[SAMPLE_ROW_START].height
 
     # 创建分类优先级映射，按照ROW_CATEGORY_MAP中定义的顺序
     category_priority = {}
@@ -295,6 +296,9 @@ def merge_into_template(data_rows, total_col_idx, store_columns, template_file, 
             else:
                 src = sample_cells[len(sample_cells) - 1]
             copy_cell_style(src, ws.cell(row=excel_row, column=col_idx))
+
+        if sample_row_height is not None:
+            ws.row_dimensions[excel_row].height = sample_row_height
 
     last_data_row = DATA_START_ROW + len(data_rows) - 1
 
