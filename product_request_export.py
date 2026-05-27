@@ -752,7 +752,7 @@ def main():
             item_row_count = search_and_count_rows(page, target_date, "btnList")
             item_path = export_and_save(page, target_date, "订货商品明细看板")
 
-            logger.info(f"\n{'=' * 55}")
+            logger.info(f"{'=' * 55}")
             logger.info(f"  ✅ 下载完成！")
             logger.info(f"  订货商品汇总看板：{summary_row_count} 行 → {summary_path}")
             logger.info(f"  订货商品明细看板：{item_row_count} 行 → {item_path}")
@@ -795,16 +795,15 @@ def main():
                     logger.info(f"  [{export_name}] 无数据，跳过")
                     continue
 
-                category_sums = aggregate_to_row_sums(detail_sums, export_cat_set)
                 output_file = OUTPUT_DIR / date_str / f"订货商品汇总看板_{export_name}_{date_str}.xlsx"
                 merge_into_template(
                     filtered_rows, total_col_idx, store_columns,
-                    TEMPLATE_FILE, output_file, category_sums,
+                    TEMPLATE_FILE, output_file, all_category_sums,
                     target_date=target_date,
                 )
                 logger.info(f"  [{export_name}] → {output_file}")
 
-            logger.info(f"\n{'=' * 55}")
+            logger.info(f"{'=' * 55}")
             logger.info(f"  ✅ 全部完成！")
             logger.info(f"{'=' * 55}\n")
 
