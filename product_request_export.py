@@ -291,7 +291,9 @@ def merge_into_template(data_rows, total_col_idx, store_columns, template_file, 
             if dst_col >= 6 and value is not None:
                 try:
                     value = float(value)
-                    if value == int(value):
+                    if value == 0:
+                        value = None
+                    elif value == int(value):
                         value = int(value)
                 except (ValueError, TypeError):
                     pass
@@ -438,7 +440,7 @@ def click_by_text(page, text: str, desc: str = ""):
 
 def login(page):
     """登录流程"""
-    logger.info("\n[1/4] 打开登录页面...")
+    logger.info("[1/4] 打开登录页面...")
     page.goto(LOGIN_URL)
     page.wait_for_load_state("networkidle")
 
@@ -500,7 +502,7 @@ def login(page):
 
 def navigate_to_board(page, board_url: str, board_name: str):
     """导航到指定看板"""
-    logger.info(f"\n  [导航] 前往{board_name}...")
+    logger.info(f"  [导航] 前往{board_name}...")
     page.goto(board_url)
     page.wait_for_load_state("networkidle", timeout=30_000)
     logger.info(f"  已到达 → {page.url}")
@@ -508,7 +510,7 @@ def navigate_to_board(page, board_url: str, board_name: str):
 
 def setup_filters(page, target_date: str, *, select_status: bool = False):
     """设置筛选条件：期望到货时间、商品分类、日期范围，可选单据状态"""
-    logger.info("\n  [筛选] 设置筛选条件...")
+    logger.info("  [筛选] 设置筛选条件...")
 
     # ── 1. 切换日期类型标签 ──
     logger.info("  → 切换到「期望到货时间」标签...")
@@ -634,7 +636,7 @@ def setup_filters(page, target_date: str, *, select_status: bool = False):
 
 def search_and_count_rows(page, target_date: str, btn_id: str, max_retries: int = 3) -> int:
     """点击查询按钮，验证日期未被重置，返回结果行数"""
-    logger.info("\n  [查询] 执行查询...")
+    logger.info("  [查询] 执行查询...")
 
     for attempt in range(1, max_retries + 1):
         logger.info(f"  查询第 {attempt} 次...")
@@ -670,7 +672,7 @@ def search_and_count_rows(page, target_date: str, btn_id: str, max_retries: int 
 
 def export_and_save(page, target_date: str, file_prefix: str) -> Path:
     """点击导出，等待下载，保存到输出目录，返回文件路径"""
-    logger.info("\n  [导出] 导出文件...")
+    logger.info("  [导出] 导出文件...")
     time.sleep(3)
 
     date_str = target_date.replace(".", "-")
@@ -801,7 +803,7 @@ def main():
                     row for row in data_rows
                     if row[1] is not None and str(row[1]).strip() in export_cat_set
                 ]
-                logger.info(f"\n  [{export_name}] 匹配 {len(filtered_rows)} 行")
+                logger.info(f"  [{export_name}] 匹配 {len(filtered_rows)} 行")
                 if not filtered_rows:
                     logger.info(f"  [{export_name}] 无数据，跳过")
                     continue
