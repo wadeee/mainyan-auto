@@ -733,7 +733,7 @@ def main():
             login(page)
 
             # ── 任务 1：订货商品汇总看板 ──
-            logger.info(f"\n{'─' * 55}")
+            logger.info(f"{'─' * 55}")
             logger.info(f"  任务 1/2：订货商品汇总看板")
             logger.info(f"{'─' * 55}")
 
@@ -743,7 +743,7 @@ def main():
             summary_path = export_and_save(page, target_date, "订货商品汇总看板")
 
             # ── 任务 2：订货商品明细看板 ──
-            logger.info(f"\n{'─' * 55}")
+            logger.info(f"{'─' * 55}")
             logger.info(f"  任务 2/2：订货商品明细看板")
             logger.info(f"{'─' * 55}")
 
