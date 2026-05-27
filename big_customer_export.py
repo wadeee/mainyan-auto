@@ -4,7 +4,7 @@
 依赖：pip install playwright && playwright install chromium
 
 自动登录后依次导出：
-  1. 订单商品报表 (OrderProductReport)
+  1. 大客户订购商品统计表 (OrderProductReport)
   2. 订货商品汇总看板 (ProductRequestSummaryBoard)
 
 用法：
@@ -411,15 +411,15 @@ def main():
         try:
             login(page)
 
-            # ── 任务 1：订单商品报表 ──
+            # ── 任务 1：大客户订购商品统计表 ──
             logger.info(f"{'─' * 55}")
-            logger.info(f"  任务 1/2：订单商品报表")
+            logger.info(f"  任务 1/2：大客户订购商品统计表")
             logger.info(f"{'─' * 55}")
 
-            navigate_to_board(page, ORDER_PRODUCT_REPORT_URL, "订单商品报表")
+            navigate_to_board(page, ORDER_PRODUCT_REPORT_URL, "大客户订购商品统计表")
             setup_filters(page, target_date)
             report_row_count = search_and_count_rows(page, target_date)
-            report_path = export_and_save(page, target_date, "订单商品报表", confirm_after_export=True)
+            report_path = export_and_save(page, target_date, "大客户订购商品统计表", confirm_after_export=True)
 
             # ── 任务 2：订货商品汇总看板 ──
             logger.info(f"{'─' * 55}")
@@ -433,7 +433,7 @@ def main():
 
             logger.info(f"{'=' * 55}")
             logger.info(f"  下载完成！")
-            logger.info(f"  订单商品报表：{report_row_count} 行 → {report_path}")
+            logger.info(f"  大客户订购商品统计表：{report_row_count} 行 → {report_path}")
             logger.info(f"  订货商品汇总看板：{summary_row_count} 行 → {summary_path}")
             logger.info(f"{'=' * 55}\n")
 
