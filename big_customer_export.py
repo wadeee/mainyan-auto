@@ -1,11 +1,12 @@
 """
-大客户导出 - 自动导出脚本
+大客户导出 - 自动导出 & 格式化脚本
 =====================================
-依赖：pip install playwright && playwright install chromium
+依赖：pip install playwright openpyxl && playwright install chromium
 
 自动登录后依次导出：
   1. 大客户订购商品统计表 (OrderProductReport)
   2. 订货商品汇总看板 (ProductRequestSummaryBoard)
+  3. 将两份数据合并填入格式化模板，生成一份统计表
 
 用法：
     python big_customer_export.py                    # 导出后天的数据
@@ -15,6 +16,7 @@
 """
 
 import argparse
+import copy
 import logging
 import logging.handlers
 import re
@@ -22,6 +24,9 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 # ─── 日志配置 ───────────────────────────────────────────────────────────────────
 LOG_DIR = Path(__file__).resolve().parent / "log"
@@ -62,6 +67,206 @@ TARGET_CATEGORIES = [
     "冷冻面团",
     "蛋糕及面包成品及饼干类",
 ]
+
+TEMPLATE_FILE = Path(__file__).resolve().parent / "大客户订购商品统计表_格式化模板.xlsx"
+
+HEADER_ROW = 2
+SAMPLE_ROW = 3
+TOTALS_ROW = 4
+DATA_START_ROW = 3
+
+
+# ─── 格式化合并函数 ──────────────────────────────────────────────────────────
+
+
+def copy_cell_style(src_cell, dst_cell):
+    if src_cell.has_style:
+        dst_cell.font = copy.copy(src_cell.font)
+        dst_cell.fill = copy.copy(src_cell.fill)
+        dst_cell.border = copy.copy(src_cell.border)
+        dst_cell.alignment = copy.copy(src_cell.alignment)
+        dst_cell.number_format = src_cell.number_format
+
+
+def read_report_data(report_file: Path):
+    """读取大客户订购商品统计表（2行表头，数据从第3行开始，门店在J/L/N...每隔2列）"""
+    wb = load_workbook(report_file, data_only=True)
+    ws = wb.active
+
+    stores = []
+    for c in range(10, ws.max_column + 1, 2):
+        name = ws.cell(row=1, column=c).value
+        if name and str(name).strip():
+            stores.append((c, str(name).strip()))
+
+    rows = []
+    for r in range(3, ws.max_row + 1):
+        first_col = ws.cell(row=r, column=1).value
+        if first_col is not None and str(first_col).strip() == "合计":
+            break
+        name = ws.cell(row=r, column=2).value
+        if name is None:
+            continue
+        quantities = {}
+        for src_col, store_name in stores:
+            val = ws.cell(row=r, column=src_col).value
+            try:
+                quantities[store_name] = float(val) if val else 0
+            except (ValueError, TypeError):
+                quantities[store_name] = 0
+        rows.append({
+            "name": ws.cell(row=r, column=2).value,
+            "category": ws.cell(row=r, column=3).value,
+            "spec": ws.cell(row=r, column=6).value,
+            "unit": ws.cell(row=r, column=7).value,
+            "quantities": quantities,
+        })
+
+    wb.close()
+    logger.info(f"  大客户订购商品统计表: {len(rows)} 行, {len(stores)} 个门店")
+    return [name for _, name in stores], rows
+
+
+def read_board_data(board_file: Path):
+    """读取订货商品汇总看板（1行表头，数据从第2行开始，门店在H/I/J...每列一个）"""
+    wb = load_workbook(board_file, data_only=True)
+    ws = wb.active
+
+    stores = []
+    for c in range(8, ws.max_column + 1):
+        name = ws.cell(row=1, column=c).value
+        if name and str(name).strip():
+            stores.append((c, str(name).strip()))
+
+    rows = []
+    for r in range(2, ws.max_row + 1):
+        name = ws.cell(row=r, column=4).value
+        if name is None:
+            continue
+        quantities = {}
+        for src_col, store_name in stores:
+            val = ws.cell(row=r, column=src_col).value
+            try:
+                quantities[store_name] = float(val) if val else 0
+            except (ValueError, TypeError):
+                quantities[store_name] = 0
+        rows.append({
+            "name": ws.cell(row=r, column=4).value,
+            "category": ws.cell(row=r, column=2).value,
+            "spec": ws.cell(row=r, column=5).value,
+            "unit": ws.cell(row=r, column=6).value,
+            "quantities": quantities,
+        })
+
+    wb.close()
+    logger.info(f"  订货商品汇总看板: {len(rows)} 行, {len(stores)} 个门店")
+    return [name for _, name in stores], rows
+
+
+def merge_into_template(report_stores, report_rows, board_stores, board_rows,
+                        template_file: Path, output_file: Path, target_date: str = None):
+    wb = load_workbook(template_file)
+    ws = wb.active
+
+    all_stores = []
+    seen = set()
+    for name in report_stores + board_stores:
+        if name not in seen:
+            all_stores.append(name)
+            seen.add(name)
+
+    store_count = len(all_stores)
+    last_col = 6 + store_count
+    template_max_col = ws.max_column
+
+    sample_cells = list(ws.iter_rows(min_row=SAMPLE_ROW, max_row=SAMPLE_ROW))[0]
+    sample_height = ws.row_dimensions[SAMPLE_ROW].height
+    totals_cells = list(ws.iter_rows(min_row=TOTALS_ROW, max_row=TOTALS_ROW))[0]
+    totals_height = ws.row_dimensions[TOTALS_ROW].height
+
+    all_rows = report_rows + board_rows
+    data_count = len(all_rows)
+
+    ws.delete_rows(SAMPLE_ROW, 2)
+    ws.insert_rows(DATA_START_ROW, data_count + 1)
+
+    if last_col > template_max_col:
+        for r in range(1, DATA_START_ROW):
+            src = ws.cell(row=r, column=template_max_col)
+            for new_col in range(template_max_col + 1, last_col + 1):
+                copy_cell_style(src, ws.cell(row=r, column=new_col))
+
+    for col in range(last_col + 1, template_max_col + 1):
+        for r in range(1, DATA_START_ROW):
+            cell = ws.cell(row=r, column=col)
+            cell.value = None
+
+    for i, store_name in enumerate(all_stores):
+        cell = ws.cell(row=HEADER_ROW, column=7 + i)
+        m = re.search(r'[（(](.+?)[）)]', str(store_name))
+        cell.value = m.group(1) if m else store_name
+
+    for i, row_data in enumerate(all_rows):
+        r = DATA_START_ROW + i
+        ws.cell(row=r, column=1).value = i + 1
+        ws.cell(row=r, column=2).value = row_data["name"]
+        ws.cell(row=r, column=3).value = row_data["category"]
+        ws.cell(row=r, column=4).value = row_data["spec"]
+        ws.cell(row=r, column=5).value = row_data["unit"]
+
+        first_letter = get_column_letter(7)
+        last_letter = get_column_letter(last_col)
+        ws.cell(row=r, column=6).value = f"=SUM({first_letter}{r}:{last_letter}{r})"
+
+        for j, store_name in enumerate(all_stores):
+            qty = row_data["quantities"].get(store_name, 0)
+            col = 7 + j
+            if qty and float(qty) != 0:
+                val = float(qty)
+                if val == int(val):
+                    val = int(val)
+                ws.cell(row=r, column=col).value = val
+
+        for col_idx in range(1, last_col + 1):
+            src_idx = min(col_idx - 1, len(sample_cells) - 1)
+            copy_cell_style(sample_cells[src_idx], ws.cell(row=r, column=col_idx))
+        if sample_height:
+            ws.row_dimensions[r].height = sample_height
+
+    tr = DATA_START_ROW + data_count
+    ws.cell(row=tr, column=1).value = data_count
+    for col in [2, 3, 4, 5]:
+        ws.cell(row=tr, column=col).value = "-"
+    for col in range(6, last_col + 1):
+        letter = get_column_letter(col)
+        ws.cell(row=tr, column=col).value = f"=SUM({letter}{DATA_START_ROW}:{letter}{tr - 1})"
+
+    for col_idx in range(1, last_col + 1):
+        src_idx = min(col_idx - 1, len(totals_cells) - 1)
+        copy_cell_style(totals_cells[src_idx], ws.cell(row=tr, column=col_idx))
+    if totals_height:
+        ws.row_dimensions[tr].height = totals_height
+
+    g_width = ws.column_dimensions["G"].width
+    if g_width:
+        for col_num in range(8, last_col + 1):
+            ws.column_dimensions[get_column_letter(col_num)].width = g_width
+
+    for merge in list(ws.merged_cells.ranges):
+        if merge.min_row == 1 and merge.max_row == 1:
+            ws.unmerge_cells(str(merge))
+    if last_col > 5:
+        ws.merge_cells(start_row=1, start_column=5, end_row=1, end_column=last_col)
+
+    if target_date:
+        for cell_ref in ["A1", "C1"]:
+            cell = ws[cell_ref]
+            if cell.value:
+                cell.value = re.sub(r"\d{4}\.\d{2}\.\d{2}", target_date, str(cell.value))
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(output_file)
+    logger.info(f"  已生成格式化文件: {output_file}")
 
 
 # ─── 浏览器自动化函数 ────────────────────────────────────────────────────────
@@ -435,6 +640,27 @@ def main():
             logger.info(f"  下载完成！")
             logger.info(f"  大客户订购商品统计表：{report_row_count} 行 → {report_path}")
             logger.info(f"  订货商品汇总看板：{summary_row_count} 行 → {summary_path}")
+            logger.info(f"{'=' * 55}\n")
+
+            # ── 任务 3：格式化合并 ──
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  任务 3/3：生成格式化统计表")
+            logger.info(f"{'─' * 55}")
+
+            date_str = target_date.replace(".", "-")
+            report_stores, report_rows = read_report_data(report_path)
+            board_stores, board_rows = read_board_data(summary_path)
+
+            output_file = OUTPUT_DIR / date_str / f"大客户订购商品统计表_格式化_{date_str}.xlsx"
+            merge_into_template(
+                report_stores, report_rows,
+                board_stores, board_rows,
+                TEMPLATE_FILE, output_file,
+                target_date=target_date,
+            )
+
+            logger.info(f"{'=' * 55}")
+            logger.info(f"  全部完成！")
             logger.info(f"{'=' * 55}\n")
 
         except Exception as e:
