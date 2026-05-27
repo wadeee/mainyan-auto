@@ -190,11 +190,11 @@ def merge_into_template(report_stores, report_rows, board_stores, board_rows,
     ws.delete_rows(SAMPLE_ROW, 2)
     ws.insert_rows(DATA_START_ROW, data_count + 1)
 
-    if last_col > template_max_col:
-        for r in range(1, DATA_START_ROW):
-            src = ws.cell(row=r, column=template_max_col)
-            for new_col in range(template_max_col + 1, last_col + 1):
-                copy_cell_style(src, ws.cell(row=r, column=new_col))
+    header_store_col = min(8, template_max_col)
+    for r in range(1, DATA_START_ROW):
+        src = ws.cell(row=r, column=header_store_col)
+        for col in range(header_store_col + 1, last_col + 1):
+            copy_cell_style(src, ws.cell(row=r, column=col))
 
     for col in range(last_col + 1, template_max_col + 1):
         for r in range(1, DATA_START_ROW):
@@ -228,7 +228,10 @@ def merge_into_template(report_stores, report_rows, board_stores, board_rows,
                 ws.cell(row=r, column=col).value = val
 
         for col_idx in range(1, last_col + 1):
-            src_idx = min(col_idx - 1, len(sample_cells) - 1)
+            if col_idx >= 7:
+                src_idx = min(7, len(sample_cells) - 1)
+            else:
+                src_idx = min(col_idx - 1, len(sample_cells) - 1)
             copy_cell_style(sample_cells[src_idx], ws.cell(row=r, column=col_idx))
         if sample_height:
             ws.row_dimensions[r].height = sample_height
@@ -242,7 +245,10 @@ def merge_into_template(report_stores, report_rows, board_stores, board_rows,
         ws.cell(row=tr, column=col).value = f"=SUM({letter}{DATA_START_ROW}:{letter}{tr - 1})"
 
     for col_idx in range(1, last_col + 1):
-        src_idx = min(col_idx - 1, len(totals_cells) - 1)
+        if col_idx >= 7:
+            src_idx = min(7, len(totals_cells) - 1)
+        else:
+            src_idx = min(col_idx - 1, len(totals_cells) - 1)
         copy_cell_style(totals_cells[src_idx], ws.cell(row=tr, column=col_idx))
     if totals_height:
         ws.row_dimensions[tr].height = totals_height
