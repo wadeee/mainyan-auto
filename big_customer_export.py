@@ -68,6 +68,17 @@ TARGET_CATEGORIES = [
     "蛋糕及面包成品及饼干类",
 ]
 
+REPORT_ALLOWED_STORES = {"焙满香滨江店", "焙满香广钢店"}
+BOARD_ALLOWED_STORES = {
+    "麦安研（顺德杏坛店）", "麦安研（东站宝泰店）", "麦安研（佛山创产店）",
+    "麦安研（顺德龙江店）", "麦安研（佛山万民金海城店）",
+}
+
+STORE_TITLE_MAP = {
+    "焙满香滨江店": "滨江店",
+    "焙满香广钢店": "广钢店",
+}
+
 TEMPLATE_FILE = Path(__file__).resolve().parent / "大客户订购商品统计表_格式化模板.xlsx"
 
 HEADER_ROW = 2
@@ -98,6 +109,7 @@ def read_report_data(report_file: Path):
         name = ws.cell(row=1, column=c).value
         if name and str(name).strip():
             stores.append((c, str(name).strip()))
+    stores = [(c, name) for c, name in stores if name in REPORT_ALLOWED_STORES]
 
     rows = []
     for r in range(3, ws.max_row + 1):
@@ -137,6 +149,7 @@ def read_board_data(board_file: Path):
         name = ws.cell(row=1, column=c).value
         if name and str(name).strip():
             stores.append((c, str(name).strip()))
+    stores = [(c, name) for c, name in stores if name in BOARD_ALLOWED_STORES]
 
     rows = []
     for r in range(2, ws.max_row + 1):
@@ -203,8 +216,11 @@ def merge_into_template(report_stores, report_rows, board_stores, board_rows,
 
     for i, store_name in enumerate(all_stores):
         cell = ws.cell(row=HEADER_ROW, column=7 + i)
-        m = re.search(r'[（(](.+?)[）)]', str(store_name))
-        cell.value = m.group(1) if m else store_name
+        if store_name in STORE_TITLE_MAP:
+            cell.value = STORE_TITLE_MAP[store_name]
+        else:
+            m = re.search(r'[（(](.+?)[）)]', str(store_name))
+            cell.value = m.group(1) if m else store_name
 
     for i, row_data in enumerate(all_rows):
         r = DATA_START_ROW + i
