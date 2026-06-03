@@ -70,6 +70,14 @@ REPORT_EXCLUDED_STORES = {"焙满香滨江店", "焙满香广钢店"}
 
 TEMPLATE_FILE = Path(__file__).resolve().parent / "大客户订购商品统计表_格式化模板.xlsx"
 
+EXPORT_CATEGORY_MAP = {
+    "面团": ["冷冻面团"],
+    "成品面包饼干": ["成品面包类", "饼干类"],
+    "蛋糕": ["蛋糕类"],
+    "物料包材": ["热销类", "冷冻肉类", "冷冻馅料类", "冷藏馅料类", "油脂类", "粉类", "糖类", "常温馅料类", "干果类", "饼干类/外",
+         "慕斯类/外", "饮品类/外", "其他/外", "专版包材类", "公版包材类", "工衣工帽围裙", "模具", "保洁用品", "配送费"],
+}
+
 HEADER_ROW = 2
 SAMPLE_ROW = 3
 TOTALS_ROW = 4
@@ -612,20 +620,51 @@ def main():
             logger.info(f"  大客户订购商品统计表：{report_row_count} 行 → {report_path}")
             logger.info(f"{'=' * 55}\n")
 
-            # ── 任务 2：格式化 ──
+            # ── 任务 2：格式化（按分类分表）──
             logger.info(f"{'─' * 55}")
-            logger.info(f"  任务 2/2：生成格式化统计表")
+            logger.info(f"  任务 2/2：生成格式化统计表（{len(EXPORT_CATEGORY_MAP) + 1} 个分表）")
             logger.info(f"{'─' * 55}")
 
             date_str = target_date.replace(".", "-")
             report_stores, report_rows = read_report_data(report_path)
 
-            output_file = OUTPUT_DIR / date_str / f"大客户订购商品统计表_格式化_{date_str}.xlsx"
+            all_output = OUTPUT_DIR / date_str / f"大客户订购商品统计表_格式化_全部_{date_str}.xlsx"
             merge_into_template(
                 report_stores, report_rows,
-                TEMPLATE_FILE, output_file,
+                TEMPLATE_FILE, all_output,
                 target_date=target_date,
             )
+            logger.info(f"  [全部] {len(report_rows)} 行 → {all_output}")
+
+            for export_name, export_cats in EXPORT_CATEGORY_MAP.items():
+                export_cat_set = set(export_cats)
+                filtered_rows = [
+                    row for row in report_rows
+                    if row["category"] is not None and str(row["category"]).strip() in export_cat_set
+                ]
+                logger.info(f"  [{export_name}] 匹配 {len(filtered_rows)} 行")
+                if not filtered_rows:
+                    logger.info(f"  [{export_name}] 无数据，跳过")
+                    continue
+
+                output_file = OUTPUT_DIR / date_str / f"大客户订购商品统计表_{export_name}_{date_str}.xlsx"
+                merge_into_template(
+                    report_stores, filtered_rows,
+                    TEMPLATE_FILE, output_file,
+                    target_date=target_date,
+                )
+
+                if export_name == "面团":
+                    wb_tmp = load_workbook(output_file)
+                    ws_tmp = wb_tmp.active
+                    for r in range(DATA_START_ROW, ws_tmp.max_row + 1):
+                        cell = ws_tmp.cell(row=r, column=3)
+                        if cell.value is not None and str(cell.value).strip() != "-":
+                            cell.font = cell.font.copy(size=12)
+                    wb_tmp.save(output_file)
+                    wb_tmp.close()
+
+                logger.info(f"  [{export_name}] → {output_file}")
 
             logger.info(f"{'=' * 55}")
             logger.info(f"  全部完成！")
