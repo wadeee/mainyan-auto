@@ -926,6 +926,8 @@ def main():
             merged_count = 0
             new_count = 0
             for rpt_row in report_rows:
+                if not any(rpt_row["quantities"].values()):
+                    continue
                 rpt_name = str(rpt_row["name"]).strip() if rpt_row["name"] else ""
                 existing_idx = name_to_row_idx.get(rpt_name)
 
