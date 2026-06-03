@@ -1019,6 +1019,17 @@ def main():
                     TEMPLATE_FILE, output_file, all_category_sums,
                     target_date=target_date,
                 )
+
+                if export_name == "面团":
+                    wb_tmp = load_workbook(output_file)
+                    ws_tmp = wb_tmp.active
+                    for r in range(DATA_START_ROW, ws_tmp.max_row + 1):
+                        cell = ws_tmp.cell(row=r, column=3)
+                        if cell.value is not None:
+                            cell.font = cell.font.copy(size=12)
+                    wb_tmp.save(output_file)
+                    wb_tmp.close()
+
                 logger.info(f"  [{export_name}] → {output_file}")
 
             logger.info(f"{'=' * 55}")
