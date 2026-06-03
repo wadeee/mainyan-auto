@@ -4,9 +4,10 @@
 依赖：pip install playwright openpyxl && playwright install chromium
 
 自动登录后依次导出：
-  1. 订货商品汇总看板 (ProductRequestSummaryBoard)
-  2. 订货商品明细看板 (ProductRequestItemBoard)
-  3. 将下载数据填入格式模板，生成格式化汇总看板
+  1. 大客户订购商品统计表 (OrderProductReport)
+  2. 订货商品汇总看板 (ProductRequestSummaryBoard)
+  3. 订货商品明细看板 (ProductRequestItemBoard)
+  4. 将下载数据填入格式模板，生成格式化汇总看板
 
 用法：
     python product_request_export.py                    # 导出后天的数据
@@ -55,6 +56,7 @@ PASSWORD = "tusijia88"
 LOGIN_URL = "https://beta69.pospal.cn/"
 SUMMARY_BOARD_URL = "https://css69.pospal.cn/ChainStoreSupplySeller/ProductRequestSummaryBoard"
 ITEM_BOARD_URL = "https://css69.pospal.cn/ChainStoreSupplySeller/ProductRequestItemBoard"
+ORDER_PRODUCT_REPORT_URL = "https://beta69.pospal.cn/EnterpriseReport/OrderProductReport"
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "订货商品汇总看板"
 TEMPLATE_FILE = Path(__file__).resolve().parent / "订货商品汇总看板_格式化模板.xlsx"
@@ -79,6 +81,13 @@ TARGET_CATEGORIES = [
     "冷冻面团",
     "蛋糕及面包成品及饼干类",
 ]
+
+REPORT_ALLOWED_STORES = {"焙满香滨江店", "焙满香广钢店"}
+
+STORE_TITLE_MAP = {
+    "焙满香滨江店": "滨江店",
+    "焙满香广钢店": "广钢店",
+}
 
 # ─── 格式化模板配置 ──────────────────────────────────────────────────────────
 ROW_CATEGORY_MAP = {
@@ -121,6 +130,46 @@ def copy_cell_style(src_cell, dst_cell):
         dst_cell.border = copy.copy(src_cell.border)
         dst_cell.alignment = copy.copy(src_cell.alignment)
         dst_cell.number_format = src_cell.number_format
+
+
+def read_report_data(report_file: Path):
+    """读取大客户订购商品统计表（2行表头，数据从第3行开始，门店在J/L/N...每隔2列）"""
+    wb = load_workbook(report_file, data_only=True)
+    ws = wb.active
+
+    stores = []
+    for c in range(10, ws.max_column + 1, 2):
+        name = ws.cell(row=1, column=c).value
+        if name and str(name).strip():
+            stores.append((c, str(name).strip()))
+    stores = [(c, name) for c, name in stores if name in REPORT_ALLOWED_STORES]
+
+    rows = []
+    for r in range(3, ws.max_row + 1):
+        first_col = ws.cell(row=r, column=1).value
+        if first_col is not None and str(first_col).strip() == "合计":
+            break
+        name = ws.cell(row=r, column=2).value
+        if name is None:
+            continue
+        quantities = {}
+        for src_col, store_name in stores:
+            val = ws.cell(row=r, column=src_col).value
+            try:
+                quantities[store_name] = float(val) if val else 0
+            except (ValueError, TypeError):
+                quantities[store_name] = 0
+        rows.append({
+            "name": ws.cell(row=r, column=2).value,
+            "category": ws.cell(row=r, column=3).value,
+            "spec": ws.cell(row=r, column=6).value,
+            "unit": ws.cell(row=r, column=7).value,
+            "quantities": quantities,
+        })
+
+    wb.close()
+    logger.info(f"  大客户订购商品统计表: {len(rows)} 行, {len(stores)} 个门店")
+    return [name for _, name in stores], rows
 
 
 def compute_category_sums(detail_file: Path, store_names: set[str]) -> dict:
@@ -328,13 +377,17 @@ def merge_into_template(data_rows, total_col_idx, store_columns, template_file, 
         for col_num in range(8, last_col + 1):
             ws.column_dimensions[get_column_letter(col_num)].width = g_width
 
-    # 保存前：将表头行 G7 起的单元格值替换为括号内的内容
+    # 保存前：将表头行 G7 起的单元格值替换为简短名称
     for col in range(7, last_col + 1):
         cell = ws.cell(row=HEADER_ROW, column=col)
         if cell.value:
-            m = re.search(r'[（(](.+?)[）)]', str(cell.value))
-            if m:
-                cell.value = m.group(1)
+            name = str(cell.value).strip()
+            if name in STORE_TITLE_MAP:
+                cell.value = STORE_TITLE_MAP[name]
+            else:
+                m = re.search(r'[（(](.+?)[）)]', name)
+                if m:
+                    cell.value = m.group(1)
 
     # 保存前：更新 A6 和 C6 中的日期
     if target_date:
@@ -634,13 +687,16 @@ def setup_filters(page, target_date: str, *, select_status: bool = False):
     set_date(page, "结束日期", f"{target_date} 23:59")
 
 
-def search_and_count_rows(page, target_date: str, btn_id: str, max_retries: int = 3) -> int:
+def search_and_count_rows(page, target_date: str, btn_id: str = None, max_retries: int = 3) -> int:
     """点击查询按钮，验证日期未被重置，返回结果行数"""
     logger.info("  [查询] 执行查询...")
 
     for attempt in range(1, max_retries + 1):
         logger.info(f"  查询第 {attempt} 次...")
-        page.evaluate(f"document.getElementById('{btn_id}').click()")
+        if btn_id:
+            page.evaluate(f"document.getElementById('{btn_id}').click()")
+        else:
+            click_by_text(page, "查询", "查询")
         page.wait_for_load_state("networkidle", timeout=90_000)
 
         result = page.evaluate("""
@@ -670,7 +726,7 @@ def search_and_count_rows(page, target_date: str, btn_id: str, max_retries: int 
     raise RuntimeError(f"查询 {max_retries} 次后日期仍然不正确，请手动检查")
 
 
-def export_and_save(page, target_date: str, file_prefix: str) -> Path:
+def export_and_save(page, target_date: str, file_prefix: str, *, confirm_after_export: bool = False) -> Path:
     """点击导出，等待下载，保存到输出目录，返回文件路径"""
     logger.info("  [导出] 导出文件...")
     time.sleep(3)
@@ -696,6 +752,28 @@ def export_and_save(page, target_date: str, file_prefix: str) -> Path:
         logger.info(f"  点击导出: {result}")
         if result == "not found":
             raise RuntimeError("未找到「导出」按钮")
+
+        if confirm_after_export:
+            time.sleep(2)
+            logger.info("  → 点击「确定」确认导出...")
+            confirm_result = page.evaluate("""
+                (function() {
+                    var candidates = [];
+                    var els = document.querySelectorAll('*');
+                    for (var i = 0; i < els.length; i++) {
+                        if (els[i].textContent.trim() === '确定' && els[i].children.length === 0 && els[i].offsetParent !== null) {
+                            candidates.push(els[i]);
+                        }
+                    }
+                    if (candidates.length > 0) {
+                        var btn = candidates[candidates.length - 1];
+                        btn.click();
+                        return 'clicked last visible confirm tag=' + btn.tagName + ' class=' + btn.className;
+                    }
+                    return 'not found';
+                })()
+            """)
+            logger.info(f"  [确定导出] → {confirm_result}")
 
     download = dl_info.value
     logger.info(f"  下载文件名: {download.suggested_filename}")
@@ -745,9 +823,19 @@ def main():
         try:
             login(page)
 
-            # ── 任务 1：订货商品汇总看板 ──
+            # ── 任务 1：大客户订购商品统计表 ──
             logger.info(f"{'─' * 55}")
-            logger.info(f"  任务 1/2：订货商品汇总看板")
+            logger.info(f"  任务 1/3：大客户订购商品统计表")
+            logger.info(f"{'─' * 55}")
+
+            navigate_to_board(page, ORDER_PRODUCT_REPORT_URL, "大客户订购商品统计表")
+            setup_filters(page, target_date)
+            report_row_count = search_and_count_rows(page, target_date)
+            report_path = export_and_save(page, target_date, "大客户订购商品统计表", confirm_after_export=True)
+
+            # ── 任务 2：订货商品汇总看板 ──
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  任务 2/3：订货商品汇总看板")
             logger.info(f"{'─' * 55}")
 
             navigate_to_board(page, SUMMARY_BOARD_URL, "订货商品汇总看板")
@@ -755,9 +843,9 @@ def main():
             summary_row_count = search_and_count_rows(page, target_date, "btnLoadRequestList")
             summary_path = export_and_save(page, target_date, "订货商品汇总看板")
 
-            # ── 任务 2：订货商品明细看板 ──
+            # ── 任务 3：订货商品明细看板 ──
             logger.info(f"{'─' * 55}")
-            logger.info(f"  任务 2/2：订货商品明细看板")
+            logger.info(f"  任务 3/3：订货商品明细看板")
             logger.info(f"{'─' * 55}")
 
             navigate_to_board(page, ITEM_BOARD_URL, "订货商品明细看板")
@@ -767,21 +855,58 @@ def main():
 
             logger.info(f"{'=' * 55}")
             logger.info(f"  ✅ 下载完成！")
+            logger.info(f"  大客户订购商品统计表：{report_row_count} 行 → {report_path}")
             logger.info(f"  订货商品汇总看板：{summary_row_count} 行 → {summary_path}")
             logger.info(f"  订货商品明细看板：{item_row_count} 行 → {item_path}")
             logger.info(f"{'=' * 55}\n")
 
-            # ── 任务 3：格式化输出（按分类分表）──
+            # ── 任务 4：格式化输出（按分类分表）──
             logger.info(f"{'─' * 55}")
-            logger.info(f"  任务 3/3：生成格式化汇总看板（{len(EXPORT_CATEGORY_MAP)} 个分表）")
+            logger.info(f"  任务 4/4：生成格式化汇总看板（{len(EXPORT_CATEGORY_MAP)} 个分表）")
             logger.info(f"{'─' * 55}\n")
 
             date_str = target_date.replace(".", "-")
+
+            logger.info("读取大客户订购商品统计表（焙满香门店数据）...")
+            report_stores, report_rows = read_report_data(report_path)
 
             logger.info("读取汇总数据源...")
             total_col_idx, store_columns, data_rows = read_data_file(summary_path)
             store_names = {name for _, name in store_columns}
             logger.info(f"  共 {len(data_rows)} 行，{len(store_columns)} 个门店")
+
+            # 为焙满香门店分配新列索引，追加到 store_columns
+            max_idx = max(max((idx for idx, _ in store_columns), default=0), total_col_idx)
+            new_store_indices = {}
+            for rpt_store in report_stores:
+                if rpt_store not in store_names:
+                    max_idx += 1
+                    store_columns.append((max_idx, rpt_store))
+                    store_names.add(rpt_store)
+                    new_store_indices[rpt_store] = max_idx
+            logger.info(f"  追加焙满香门店: {list(new_store_indices.keys())}")
+
+            # 扩展现有数据行，为新门店列填 None
+            required_len = max_idx + 1
+            for i, row in enumerate(data_rows):
+                if len(row) < required_len:
+                    data_rows[i] = list(row) + [None] * (required_len - len(row))
+
+            # 将大客户数据行转换为列表格式追加到 data_rows
+            for rpt_row in report_rows:
+                new_row = [None] * required_len
+                new_row[1] = rpt_row["category"]
+                new_row[3] = rpt_row["name"]
+                new_row[4] = rpt_row["spec"]
+                new_row[5] = rpt_row["unit"]
+                total_qty = sum(rpt_row["quantities"].values())
+                new_row[total_col_idx] = total_qty if total_qty else 0
+                for sname, col_idx in new_store_indices.items():
+                    qty = rpt_row["quantities"].get(sname, 0)
+                    new_row[col_idx] = qty if qty else None
+                data_rows.append(new_row)
+
+            logger.info(f"  合并后共 {len(data_rows)} 行，{len(store_columns)} 个门店")
 
             detail_sums = {}
             if item_path.exists():
