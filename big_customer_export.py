@@ -658,7 +658,7 @@ def main():
                     wb_tmp = load_workbook(output_file)
                     ws_tmp = wb_tmp.active
                     for r in range(DATA_START_ROW, ws_tmp.max_row + 1):
-                        cell = ws_tmp.cell(row=r, column=3)
+                        cell = ws_tmp.cell(row=r, column=2)
                         if cell.value is not None and str(cell.value).strip() != "-":
                             cell.font = cell.font.copy(size=12)
                     wb_tmp.save(output_file)
