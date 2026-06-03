@@ -224,6 +224,17 @@ def merge_into_template(report_stores, report_rows,
     if last_col > 5:
         ws.merge_cells(start_row=1, start_column=5, end_row=1, end_column=last_col)
 
+    if data_count == 0:
+        for col in [7, 8]:  # G, H
+            for r in range(1, ws.max_row + 1):
+                cell = ws.cell(row=r, column=col)
+                if not isinstance(cell, MergedCell):
+                    cell.value = None
+        for col in range(1, ws.max_column + 1):
+            cell = ws.cell(row=3, column=col)
+            if not isinstance(cell, MergedCell):
+                cell.value = None
+
     if target_date:
         target_dt = datetime.strptime(target_date, "%Y.%m.%d")
         prev_day = (target_dt - timedelta(days=2)).strftime("%Y.%m.%d")
