@@ -164,7 +164,9 @@ def merge_into_template(report_stores, report_rows,
     for i, store_name in enumerate(all_stores):
         cell = ws.cell(row=HEADER_ROW, column=7 + i)
         m = re.search(r'[（(](.+?)[）)]', str(store_name))
-        cell.value = m.group(1) if m else store_name
+        short_name = m.group(1) if m else store_name
+        short_name = re.sub(r'兔司家|甜麦面包屋', '', short_name).strip()
+        cell.value = short_name
 
     for i, row_data in enumerate(all_rows):
         r = DATA_START_ROW + i
