@@ -24,6 +24,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from openpyxl import load_workbook
+from openpyxl.cell.cell import MergedCell
 from openpyxl.utils import get_column_letter
 
 # ─── 日志配置 ───────────────────────────────────────────────────────────────────
@@ -157,7 +158,8 @@ def merge_into_template(report_stores, report_rows,
     for col in range(last_col + 1, template_max_col + 1):
         for r in range(1, DATA_START_ROW):
             cell = ws.cell(row=r, column=col)
-            cell.value = None
+            if not isinstance(cell, MergedCell):
+                cell.value = None
 
     for i, store_name in enumerate(all_stores):
         cell = ws.cell(row=HEADER_ROW, column=7 + i)
@@ -223,10 +225,12 @@ def merge_into_template(report_stores, report_rows,
         ws.merge_cells(start_row=1, start_column=5, end_row=1, end_column=last_col)
 
     if target_date:
-        for cell_ref in ["A1", "C1"]:
+        target_dt = datetime.strptime(target_date, "%Y.%m.%d")
+        prev_day = (target_dt - timedelta(days=2)).strftime("%Y.%m.%d")
+        for cell_ref, new_date in [("A1", prev_day), ("C1", target_date)]:
             cell = ws[cell_ref]
             if cell.value:
-                cell.value = re.sub(r"\d{4}\.\d{2}\.\d{2}", target_date, str(cell.value))
+                cell.value = re.sub(r"\d{4}\.\d{2}\.\d{2}", new_date, str(cell.value))
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_file)
