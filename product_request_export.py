@@ -892,20 +892,52 @@ def main():
                 if len(row) < required_len:
                     data_rows[i] = list(row) + [None] * (required_len - len(row))
 
-            # 将大客户数据行转换为列表格式追加到 data_rows
-            for rpt_row in report_rows:
-                new_row = [None] * required_len
-                new_row[1] = rpt_row["category"]
-                new_row[3] = rpt_row["name"]
-                new_row[4] = rpt_row["spec"]
-                new_row[5] = rpt_row["unit"]
-                total_qty = sum(rpt_row["quantities"].values())
-                new_row[total_col_idx] = total_qty if total_qty else 0
-                for sname, col_idx in new_store_indices.items():
-                    qty = rpt_row["quantities"].get(sname, 0)
-                    new_row[col_idx] = qty if qty else None
-                data_rows.append(new_row)
+            # 建立商品名称到行索引的映射，用于合并同名商品
+            name_to_row_idx = {}
+            for i, row in enumerate(data_rows):
+                name = str(row[3]).strip() if row[3] is not None else ""
+                if name:
+                    name_to_row_idx[name] = i
 
+            # 将大客户数据合并到 data_rows（同名商品合并到已有行，否则新增行）
+            merged_count = 0
+            new_count = 0
+            for rpt_row in report_rows:
+                rpt_name = str(rpt_row["name"]).strip() if rpt_row["name"] else ""
+                existing_idx = name_to_row_idx.get(rpt_name)
+
+                if existing_idx is not None:
+                    # 同名商品：在已有行的焙满香门店列填入数量
+                    existing = data_rows[existing_idx]
+                    for sname, col_idx in new_store_indices.items():
+                        qty = rpt_row["quantities"].get(sname, 0)
+                        existing[col_idx] = qty if qty else None
+                    # 更新合计订货量：加上焙满香的数量
+                    rpt_total = sum(rpt_row["quantities"].values())
+                    old_total = existing[total_col_idx] or 0
+                    try:
+                        old_total = float(old_total)
+                    except (ValueError, TypeError):
+                        old_total = 0
+                    existing[total_col_idx] = old_total + rpt_total
+                    merged_count += 1
+                else:
+                    # 新商品：创建新行追加
+                    new_row = [None] * required_len
+                    new_row[1] = rpt_row["category"]
+                    new_row[3] = rpt_row["name"]
+                    new_row[4] = rpt_row["spec"]
+                    new_row[5] = rpt_row["unit"]
+                    total_qty = sum(rpt_row["quantities"].values())
+                    new_row[total_col_idx] = total_qty if total_qty else 0
+                    for sname, col_idx in new_store_indices.items():
+                        qty = rpt_row["quantities"].get(sname, 0)
+                        new_row[col_idx] = qty if qty else None
+                    data_rows.append(new_row)
+                    name_to_row_idx[rpt_name] = len(data_rows) - 1
+                    new_count += 1
+
+            logger.info(f"  焙满香数据: {merged_count} 行合并到已有商品, {new_count} 行为新增商品")
             logger.info(f"  合并后共 {len(data_rows)} 行，{len(store_columns)} 个门店")
 
             detail_sums = {}
