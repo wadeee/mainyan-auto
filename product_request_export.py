@@ -98,6 +98,15 @@ ROW_CATEGORY_MAP = {
     5: ["配送费"],
 }
 
+# 大客户报表上级分类名 → ROW_CATEGORY_MAP 行号（报表 column 3 可能返回这些名称）
+REPORT_CATEGORY_TO_ROW = {
+    "蛋糕及面包成品及饼干类": 3,
+    "原料铺料": 4,
+    "包材耗材": 4,
+    "工衣模具": 4,
+    "慕斯+饼干+饮品+其他": 4,
+}
+
 EXPORT_CATEGORY_MAP = {
     "面团": ["冷冻面团"],
     "成品面包饼干": ["成品面包类", "饼干类"],
@@ -153,18 +162,25 @@ def read_report_data(report_file: Path):
         if name is None:
             continue
         quantities = {}
+        amounts = {}
         for src_col, store_name in stores:
             val = ws.cell(row=r, column=src_col).value
             try:
                 quantities[store_name] = float(val) if val else 0
             except (ValueError, TypeError):
                 quantities[store_name] = 0
+            amt_val = ws.cell(row=r, column=src_col + 1).value
+            try:
+                amounts[store_name] = float(amt_val) if amt_val else 0
+            except (ValueError, TypeError):
+                amounts[store_name] = 0
         rows.append({
             "name": ws.cell(row=r, column=2).value,
             "category": ws.cell(row=r, column=3).value,
             "spec": ws.cell(row=r, column=6).value,
             "unit": ws.cell(row=r, column=7).value,
             "quantities": quantities,
+            "amounts": amounts,
         })
 
     wb.close()
@@ -315,16 +331,23 @@ def merge_into_template(data_rows, total_col_idx, store_columns, template_file, 
 
     # 创建分类优先级映射，按照ROW_CATEGORY_MAP中定义的顺序
     category_priority = {}
+    row_first_priority = {}
     priority = 0
     for row_num, categories in ROW_CATEGORY_MAP.items():
+        row_first_priority[row_num] = priority
         for cat in categories:
             category_priority[cat] = priority
             priority += 1
+    max_priority = priority
+
+    for cat, rn in REPORT_CATEGORY_TO_ROW.items():
+        if cat not in category_priority:
+            category_priority[cat] = row_first_priority[rn]
 
     # 对数据行按照分类在ROW_CATEGORY_MAP中的顺序进行排序
     def get_category_priority(row_data):
         category = str(row_data[1]).strip() if row_data[1] is not None else ""
-        return category_priority.get(category, float('inf'))
+        return category_priority.get(category, max_priority)
 
     sorted_data_rows = sorted(data_rows, key=get_category_priority)
 
@@ -946,6 +969,29 @@ def main():
                 detail_sums = compute_detail_sums_by_category(item_path, store_names)
 
             all_category_sums = aggregate_to_row_sums(detail_sums, None)
+
+            # 将大客户报表的金额累加到 rows 2-5 的分类汇总中
+            cat_to_row = {}
+            for _rn, _cats in ROW_CATEGORY_MAP.items():
+                for _c in _cats:
+                    cat_to_row[_c] = _rn
+            for _c, _rn in REPORT_CATEGORY_TO_ROW.items():
+                if _c not in cat_to_row:
+                    cat_to_row[_c] = _rn
+            report_amt_total = 0
+            for rpt_row in report_rows:
+                cat = str(rpt_row["category"]).strip() if rpt_row["category"] else ""
+                rn = cat_to_row.get(cat)
+                if rn is None:
+                    continue
+                for sname, amt in rpt_row.get("amounts", {}).items():
+                    if amt:
+                        key = (rn, sname)
+                        all_category_sums[key] = all_category_sums.get(key, 0) + amt
+                        report_amt_total += amt
+            if report_amt_total:
+                logger.info(f"  大客户报表金额汇总: {report_amt_total:.2f}")
+
             all_output = OUTPUT_DIR / date_str / f"订货商品汇总看板_格式化_全部_{date_str}.xlsx"
             merge_into_template(
                 data_rows, total_col_idx, store_columns,
