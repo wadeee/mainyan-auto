@@ -123,6 +123,8 @@ def read_report_data(report_file: Path):
                 quantities[store_name] = float(val) if val else 0
             except (ValueError, TypeError):
                 quantities[store_name] = 0
+        if not any(quantities.values()):
+            continue
         rows.append({
             "name": ws.cell(row=r, column=2).value,
             "category": ws.cell(row=r, column=3).value,
