@@ -3,10 +3,8 @@
 =====================================
 依赖：pip install playwright openpyxl && playwright install chromium
 
-自动登录后依次导出：
-  1. 大客户订购商品统计表 (OrderProductReport)
-  2. 订货商品汇总看板 (ProductRequestSummaryBoard)
-  3. 将两份数据合并填入格式化模板，生成一份统计表
+自动登录后导出大客户订购商品统计表 (OrderProductReport)，
+并填入格式化模板生成统计表。
 
 用法：
     python big_customer_export.py                    # 导出后天的数据
@@ -54,7 +52,6 @@ PASSWORD = "tusijia88"
 
 LOGIN_URL = "https://beta69.pospal.cn/"
 ORDER_PRODUCT_REPORT_URL = "https://beta69.pospal.cn/EnterpriseReport/OrderProductReport"
-SUMMARY_BOARD_URL = "https://css69.pospal.cn/ChainStoreSupplySeller/ProductRequestSummaryBoard"
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "大客户订购商品统计表"
 
@@ -68,16 +65,7 @@ TARGET_CATEGORIES = [
     "蛋糕及面包成品及饼干类",
 ]
 
-REPORT_ALLOWED_STORES = {"焙满香滨江店", "焙满香广钢店"}
-BOARD_ALLOWED_STORES = {
-    "麦安研（顺德杏坛店）", "麦安研（东站宝泰店）", "麦安研（佛山创产店）",
-    "麦安研（顺德龙江店）", "麦安研（佛山万民金海城店）",
-}
-
-STORE_TITLE_MAP = {
-    "焙满香滨江店": "滨江店",
-    "焙满香广钢店": "广钢店",
-}
+REPORT_EXCLUDED_STORES = {"焙满香滨江店", "焙满香广钢店"}
 
 TEMPLATE_FILE = Path(__file__).resolve().parent / "大客户订购商品统计表_格式化模板.xlsx"
 
@@ -109,7 +97,7 @@ def read_report_data(report_file: Path):
         name = ws.cell(row=1, column=c).value
         if name and str(name).strip():
             stores.append((c, str(name).strip()))
-    stores = [(c, name) for c, name in stores if name in REPORT_ALLOWED_STORES]
+    stores = [(c, name) for c, name in stores if name not in REPORT_EXCLUDED_STORES]
 
     rows = []
     for r in range(3, ws.max_row + 1):
@@ -139,55 +127,12 @@ def read_report_data(report_file: Path):
     return [name for _, name in stores], rows
 
 
-def read_board_data(board_file: Path):
-    """读取订货商品汇总看板（1行表头，数据从第2行开始，门店在H/I/J...每列一个）"""
-    wb = load_workbook(board_file, data_only=True)
-    ws = wb.active
-
-    stores = []
-    for c in range(8, ws.max_column + 1):
-        name = ws.cell(row=1, column=c).value
-        if name and str(name).strip():
-            stores.append((c, str(name).strip()))
-    stores = [(c, name) for c, name in stores if name in BOARD_ALLOWED_STORES]
-
-    rows = []
-    for r in range(2, ws.max_row + 1):
-        name = ws.cell(row=r, column=4).value
-        if name is None:
-            continue
-        quantities = {}
-        for src_col, store_name in stores:
-            val = ws.cell(row=r, column=src_col).value
-            try:
-                quantities[store_name] = float(val) if val else 0
-            except (ValueError, TypeError):
-                quantities[store_name] = 0
-        rows.append({
-            "name": ws.cell(row=r, column=4).value,
-            "category": ws.cell(row=r, column=2).value,
-            "spec": ws.cell(row=r, column=5).value,
-            "unit": ws.cell(row=r, column=6).value,
-            "quantities": quantities,
-        })
-
-    wb.close()
-    logger.info(f"  订货商品汇总看板: {len(rows)} 行, {len(stores)} 个门店")
-    return [name for _, name in stores], rows
-
-
-def merge_into_template(report_stores, report_rows, board_stores, board_rows,
+def merge_into_template(report_stores, report_rows,
                         template_file: Path, output_file: Path, target_date: str = None):
     wb = load_workbook(template_file)
     ws = wb.active
 
-    all_stores = []
-    seen = set()
-    for name in report_stores + board_stores:
-        if name not in seen:
-            all_stores.append(name)
-            seen.add(name)
-
+    all_stores = report_stores
     store_count = len(all_stores)
     last_col = 6 + store_count
     template_max_col = ws.max_column
@@ -197,7 +142,7 @@ def merge_into_template(report_stores, report_rows, board_stores, board_rows,
     totals_cells = list(ws.iter_rows(min_row=TOTALS_ROW, max_row=TOTALS_ROW))[0]
     totals_height = ws.row_dimensions[TOTALS_ROW].height
 
-    all_rows = report_rows + board_rows
+    all_rows = report_rows
     data_count = len(all_rows)
 
     ws.delete_rows(SAMPLE_ROW, 2)
@@ -216,11 +161,8 @@ def merge_into_template(report_stores, report_rows, board_stores, board_rows,
 
     for i, store_name in enumerate(all_stores):
         cell = ws.cell(row=HEADER_ROW, column=7 + i)
-        if store_name in STORE_TITLE_MAP:
-            cell.value = STORE_TITLE_MAP[store_name]
-        else:
-            m = re.search(r'[（(](.+?)[）)]', str(store_name))
-            cell.value = m.group(1) if m else store_name
+        m = re.search(r'[（(](.+?)[）)]', str(store_name))
+        cell.value = m.group(1) if m else store_name
 
     for i, row_data in enumerate(all_rows):
         r = DATA_START_ROW + i
@@ -640,7 +582,7 @@ def main():
 
             # ── 任务 1：大客户订购商品统计表 ──
             logger.info(f"{'─' * 55}")
-            logger.info(f"  任务 1/2：大客户订购商品统计表")
+            logger.info(f"  任务 1/2：下载大客户订购商品统计表")
             logger.info(f"{'─' * 55}")
 
             navigate_to_board(page, ORDER_PRODUCT_REPORT_URL, "大客户订购商品统计表")
@@ -648,35 +590,22 @@ def main():
             report_row_count = search_and_count_rows(page, target_date)
             report_path = export_and_save(page, target_date, "大客户订购商品统计表", confirm_after_export=True)
 
-            # ── 任务 2：订货商品汇总看板 ──
-            logger.info(f"{'─' * 55}")
-            logger.info(f"  任务 2/2：订货商品汇总看板")
-            logger.info(f"{'─' * 55}")
-
-            navigate_to_board(page, SUMMARY_BOARD_URL, "订货商品汇总看板")
-            setup_filters(page, target_date)
-            summary_row_count = search_and_count_rows(page, target_date, "btnLoadRequestList")
-            summary_path = export_and_save(page, target_date, "订货商品汇总看板")
-
             logger.info(f"{'=' * 55}")
             logger.info(f"  下载完成！")
             logger.info(f"  大客户订购商品统计表：{report_row_count} 行 → {report_path}")
-            logger.info(f"  订货商品汇总看板：{summary_row_count} 行 → {summary_path}")
             logger.info(f"{'=' * 55}\n")
 
-            # ── 任务 3：格式化合并 ──
+            # ── 任务 2：格式化 ──
             logger.info(f"{'─' * 55}")
-            logger.info(f"  任务 3/3：生成格式化统计表")
+            logger.info(f"  任务 2/2：生成格式化统计表")
             logger.info(f"{'─' * 55}")
 
             date_str = target_date.replace(".", "-")
             report_stores, report_rows = read_report_data(report_path)
-            board_stores, board_rows = read_board_data(summary_path)
 
             output_file = OUTPUT_DIR / date_str / f"大客户订购商品统计表_格式化_{date_str}.xlsx"
             merge_into_template(
                 report_stores, report_rows,
-                board_stores, board_rows,
                 TEMPLATE_FILE, output_file,
                 target_date=target_date,
             )
