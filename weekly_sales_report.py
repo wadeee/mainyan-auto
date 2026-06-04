@@ -46,6 +46,7 @@ PASSWORD = "tusijia88"
 
 LOGIN_URL = "https://beta69.pospal.cn/"
 DELIVERY_COMPARISON_URL = "https://css69.pospal.cn/EnterpriseReport/DeliveryComparison"
+DELIVERY_PRODUCT_COMPARISON_URL = "https://css69.pospal.cn/EnterpriseReport/DeliveryProductComparison"
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "周度销售报表"
 
@@ -250,9 +251,54 @@ def main():
             download.save_as(dest)
             logger.info(f"  已保存到: {dest}")
 
+            # ── 步骤 2：仓库配送商品大客户对比表 ──
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  步骤：下载仓库配送商品大客户对比表")
+            logger.info(f"{'─' * 55}")
+
+            logger.info("  [导航] 前往仓库配送商品大客户对比表...")
+            page.goto(DELIVERY_PRODUCT_COMPARISON_URL)
+            page.wait_for_load_state("networkidle", timeout=30_000)
+            logger.info(f"  已到达 → {page.url}")
+
+            logger.info(f"  → 设置完成时间: {monday_str} ~ {sunday_str}...")
+            set_date(page, "开始日期", f"{monday_str} 00:00")
+            set_date(page, "结束日期", f"{sunday_str} 23:59")
+
+            logger.info("  [查询] 执行查询...")
+            click_by_text(page, "查询", "查询")
+            page.wait_for_load_state("networkidle", timeout=90_000)
+            time.sleep(3)
+
+            logger.info("  [导出] 导出文件...")
+            with page.expect_download(timeout=60_000) as dl_info2:
+                result = page.evaluate("""
+                    (function() {
+                        var els = document.querySelectorAll('*');
+                        for (var i = 0; i < els.length; i++) {
+                            if (els[i].textContent.trim() === '导出' && els[i].children.length === 0) {
+                                els[i].click();
+                                return 'ok';
+                            }
+                        }
+                        return 'not found';
+                    })()
+                """)
+                logger.info(f"  点击导出: {result}")
+                if result == "not found":
+                    raise RuntimeError("未找到「导出」按钮")
+
+            download2 = dl_info2.value
+            logger.info(f"  下载文件名: {download2.suggested_filename}")
+
+            dest2 = output_dir / f"仓库配送商品大客户对比表_{date_range_str}.xlsx"
+            download2.save_as(dest2)
+            logger.info(f"  已保存到: {dest2}")
+
             logger.info(f"{'=' * 55}")
             logger.info(f"  周度销售报表全部完成！")
             logger.info(f"  仓库配送大客户对比表 → {dest}")
+            logger.info(f"  仓库配送商品大客户对比表 → {dest2}")
             logger.info(f"{'=' * 55}\n")
 
         except Exception as e:
