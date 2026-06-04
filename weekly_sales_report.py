@@ -1,9 +1,9 @@
 """
-仓库配送大客户对比表 - 自动导出脚本
+月度销售报表 - 自动化脚本
 =====================================
 依赖：pip install playwright && playwright install chromium
 
-自动登录后导出仓库配送大客户对比表 (DeliveryComparison)
+自动登录 Pospal 后台，依次完成月度销售报表所需的数据导出与处理。
 
 用法：
     python weekly_sales_report.py                    # 导出本周数据（周一到周日）
@@ -47,7 +47,7 @@ PASSWORD = "tusijia88"
 LOGIN_URL = "https://beta69.pospal.cn/"
 DELIVERY_COMPARISON_URL = "https://css69.pospal.cn/EnterpriseReport/DeliveryComparison"
 
-OUTPUT_DIR = Path(__file__).resolve().parent / "仓库配送大客户对比表"
+OUTPUT_DIR = Path(__file__).resolve().parent / "月度销售报表"
 
 
 # ─── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -163,7 +163,7 @@ def login(page):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Pospal 仓库配送大客户对比表自动导出")
+    parser = argparse.ArgumentParser(description="Pospal 月度销售报表自动化脚本")
     parser.add_argument("--weeks", type=int, default=0, help="周偏移量：0=本周，-1=上周（默认0）")
     parser.add_argument("--date", type=str, help="指定日期推断所在周，格式 YYYY.MM.DD")
     parser.add_argument("--headless", action="store_true", help="无头模式（不显示浏览器窗口）")
@@ -179,7 +179,7 @@ def main():
     date_range_str = f"{monday.strftime('%Y-%m-%d')}~{sunday.strftime('%Y-%m-%d')}"
 
     logger.info(f"{'=' * 55}")
-    logger.info(f"  Pospal 仓库配送大客户对比表导出")
+    logger.info(f"  Pospal 月度销售报表")
     logger.info(f"  目标周：{monday_str} ~ {sunday_str}")
     logger.info(f"  输出根目录：{OUTPUT_DIR}")
     logger.info(f"{'=' * 55}")
@@ -205,7 +205,7 @@ def main():
             login(page)
 
             logger.info(f"{'─' * 55}")
-            logger.info(f"  任务：仓库配送大客户对比表")
+            logger.info(f"  步骤：下载仓库配送大客户对比表")
             logger.info(f"{'─' * 55}")
 
             logger.info("  [导航] 前往仓库配送大客户对比表...")
@@ -251,7 +251,7 @@ def main():
             logger.info(f"  已保存到: {dest}")
 
             logger.info(f"{'=' * 55}")
-            logger.info(f"  全部完成！")
+            logger.info(f"  月度销售报表全部完成！")
             logger.info(f"  仓库配送大客户对比表 → {dest}")
             logger.info(f"{'=' * 55}\n")
 
