@@ -132,8 +132,6 @@ def merge_delivery_into_template(data_rows, template_file: Path, output_file: Pa
     for merge in list(ws.merged_cells.ranges):
         if merge.min_col in (7, 8):
             ws.unmerge_cells(str(merge))
-    ws.cell(row=TOTALS_ROW, column=7).value = None
-    ws.cell(row=TOTALS_ROW, column=8).value = None
 
     ws.delete_rows(SAMPLE_ROW, 2)
     ws.insert_rows(DATA_START_ROW, data_count)
@@ -175,6 +173,14 @@ def merge_delivery_into_template(data_rows, template_file: Path, output_file: Pa
     for col_idx in range(1, max_col + 1):
         src_idx = min(col_idx - 1, len(totals_cells) - 1)
         copy_cell_style(totals_cells[src_idx], ws.cell(row=tr, column=col_idx))
+
+    ws.merge_cells(f"G{TOTALS_ROW}:G{last_data_row}")
+    ws.merge_cells(f"H{TOTALS_ROW}:H{last_data_row}")
+
+    date_sheet = f"{monday.month}.{monday.day}-{sunday.month}.{sunday.day}"
+    old_sheet_name = ws.title
+    new_sheet_name = re.sub(r'\d{1,2}\.\d{1,2}-\d{1,2}\.\d{1,2}', date_sheet, old_sheet_name)
+    ws.title = new_sheet_name
 
     cell_a1 = ws.cell(row=1, column=1)
     if cell_a1.value:
