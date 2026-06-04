@@ -13,12 +13,17 @@
 """
 
 import argparse
+import copy
 import logging
 import logging.handlers
+import re
 import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 # ─── 日志配置 ───────────────────────────────────────────────────────────────────
 LOG_DIR = Path(__file__).resolve().parent / "log"
@@ -49,6 +54,160 @@ DELIVERY_COMPARISON_URL = "https://css69.pospal.cn/EnterpriseReport/DeliveryComp
 DELIVERY_PRODUCT_COMPARISON_URL = "https://css69.pospal.cn/EnterpriseReport/DeliveryProductComparison"
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "周度销售报表"
+TEMPLATE_FILE = Path(__file__).resolve().parent / "周度_工厂配送兔司家门店货品对比表及销售排行表_格式化模板.xlsx"
+
+HEADER_ROW = 2
+TOTALS_ROW = 3
+DATA_START_ROW = 4
+SAMPLE_ROW = 4
+
+SRC_COL_MAP = {
+    "大客户名称": "B",
+    "实际出库成本": "C",
+    "销售出库单数": "I",
+    "销售退货单数": "J",
+    "出库量": "K",
+    "退货量": "L",
+    "实际出库量": "M",
+    "出库金额": "N",
+    "退货金额": "O",
+}
+
+
+# ─── 格式化合并函数 ──────────────────────────────────────────────────────────
+
+
+def copy_cell_style(src_cell, dst_cell):
+    if src_cell.has_style:
+        dst_cell.font = copy.copy(src_cell.font)
+        dst_cell.fill = copy.copy(src_cell.fill)
+        dst_cell.border = copy.copy(src_cell.border)
+        dst_cell.alignment = copy.copy(src_cell.alignment)
+        dst_cell.number_format = src_cell.number_format
+
+
+def read_delivery_comparison(data_file: Path):
+    wb = load_workbook(data_file, data_only=True)
+    ws = wb.active
+
+    headers = {}
+    for c in range(1, ws.max_column + 1):
+        val = ws.cell(row=1, column=c).value
+        if val:
+            headers[str(val).strip()] = c
+
+    rows = []
+    for r in range(2, ws.max_row + 1):
+        name = ws.cell(row=r, column=headers["大客户名称"]).value
+        if name is None or str(name).strip() == "-":
+            break
+        row_data = {}
+        for h, c in headers.items():
+            row_data[h] = ws.cell(row=r, column=c).value
+        rows.append(row_data)
+
+    wb.close()
+    return rows
+
+
+def merge_delivery_into_template(data_rows, template_file: Path, output_file: Path,
+                                  monday: datetime, sunday: datetime):
+    wb = load_workbook(template_file)
+    ws = wb.active
+
+    max_col = 15
+
+    sample_cells = list(ws.iter_rows(min_row=SAMPLE_ROW, max_row=SAMPLE_ROW))[0]
+    sample_height = ws.row_dimensions[SAMPLE_ROW].height
+    totals_cells = list(ws.iter_rows(min_row=TOTALS_ROW, max_row=TOTALS_ROW))[0]
+
+    data_rows_sorted = sorted(
+        data_rows,
+        key=lambda r: float(r.get("实际出库成本", 0) or 0),
+        reverse=True,
+    )
+    data_count = len(data_rows_sorted)
+
+    for merge in list(ws.merged_cells.ranges):
+        if merge.min_col in (7, 8):
+            ws.unmerge_cells(str(merge))
+    ws.cell(row=TOTALS_ROW, column=7).value = None
+    ws.cell(row=TOTALS_ROW, column=8).value = None
+
+    ws.delete_rows(SAMPLE_ROW, 2)
+    ws.insert_rows(DATA_START_ROW, data_count)
+
+    for i, row_data in enumerate(data_rows_sorted):
+        r = DATA_START_ROW + i
+        ws.cell(row=r, column=1).value = f"=ROW()-3"
+        ws.cell(row=r, column=2).value = row_data.get("大客户名称")
+
+        cost = row_data.get("实际出库成本")
+        ws.cell(row=r, column=3).value = float(cost) if cost else None
+
+        c_letter = "C"
+        f_letter = "F"
+        ws.cell(row=r, column=4).value = f"={c_letter}{r}-{f_letter}{r}"
+
+        ws.cell(row=r, column=9).value = _to_num(row_data.get("销售出库单数"))
+        ws.cell(row=r, column=10).value = _to_num(row_data.get("销售退货单数"))
+        ws.cell(row=r, column=11).value = _to_num(row_data.get("出库量"))
+        ws.cell(row=r, column=12).value = _to_num(row_data.get("退货量"))
+        ws.cell(row=r, column=13).value = _to_num(row_data.get("实际出库量"))
+        ws.cell(row=r, column=14).value = _to_num(row_data.get("出库金额"))
+        ws.cell(row=r, column=15).value = _to_num(row_data.get("退货金额"))
+
+        for col_idx in range(1, max_col + 1):
+            src_idx = min(col_idx - 1, len(sample_cells) - 1)
+            copy_cell_style(sample_cells[src_idx], ws.cell(row=r, column=col_idx))
+        if sample_height:
+            ws.row_dimensions[r].height = sample_height
+
+    tr = TOTALS_ROW
+    last_data_row = DATA_START_ROW + data_count - 1
+
+    ws.cell(row=tr, column=1).value = "合计"
+    for col in [3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15]:
+        letter = get_column_letter(col)
+        ws.cell(row=tr, column=col).value = f"=SUM({letter}{DATA_START_ROW}:{letter}{last_data_row})"
+
+    for col_idx in range(1, max_col + 1):
+        src_idx = min(col_idx - 1, len(totals_cells) - 1)
+        copy_cell_style(totals_cells[src_idx], ws.cell(row=tr, column=col_idx))
+
+    cell_a1 = ws.cell(row=1, column=1)
+    if cell_a1.value:
+        old_text = str(cell_a1.value)
+        m_start = monday.month
+        d_start = monday.day
+        m_end = sunday.month
+        d_end = sunday.day
+        y = monday.year
+
+        new_text = re.sub(
+            r'\d{4}年\d{1,2}月\d{1,2}日至\d{1,2}月\d{1,2}日',
+            f"{y}年{m_start}月{d_start}日至{m_end}月{d_end}日",
+            old_text,
+        )
+        cell_a1.value = new_text
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(output_file)
+    logger.info(f"  已生成格式化文件: {output_file}")
+
+
+def _to_num(val):
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        if f == 0:
+            return None
+        if f == int(f):
+            return int(f)
+        return f
+    except (ValueError, TypeError):
+        return val
 
 
 # ─── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -296,9 +455,26 @@ def main():
             logger.info(f"  已保存到: {dest2}")
 
             logger.info(f"{'=' * 55}")
-            logger.info(f"  周度销售报表全部完成！")
+            logger.info(f"  周度销售报表下载完成！")
             logger.info(f"  仓库配送大客户对比表 → {dest}")
             logger.info(f"  仓库配送商品大客户对比表 → {dest2}")
+            logger.info(f"{'=' * 55}\n")
+
+            # ── 步骤 3：格式化仓库配送大客户对比表 ──
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  步骤：格式化仓库配送大客户对比表")
+            logger.info(f"{'─' * 55}")
+
+            logger.info("  读取仓库配送大客户对比表...")
+            delivery_rows = read_delivery_comparison(dest)
+            logger.info(f"  共 {len(delivery_rows)} 行大客户数据")
+
+            formatted_output = OUTPUT_DIR / date_range_str / f"工厂配送兔司家门店货品对比表_{date_range_str}.xlsx"
+            merge_delivery_into_template(delivery_rows, TEMPLATE_FILE, formatted_output, monday, sunday)
+            logger.info(f"  格式化输出 → {formatted_output}")
+
+            logger.info(f"{'=' * 55}")
+            logger.info(f"  周度销售报表全部完成！")
             logger.info(f"{'=' * 55}\n")
 
         except Exception as e:
