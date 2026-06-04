@@ -62,19 +62,6 @@ TOTALS_ROW = 3
 DATA_START_ROW = 4
 SAMPLE_ROW = 4
 
-SRC_COL_MAP = {
-    "大客户名称": "B",
-    "实际出库金额": "C",
-    "销售出库单数": "I",
-    "销售退货单数": "J",
-    "出库量": "K",
-    "退货量": "L",
-    "实际出库量": "M",
-    "出库金额": "N",
-    "退货金额": "O",
-}
-
-
 # ─── 格式化合并函数 ──────────────────────────────────────────────────────────
 
 
@@ -87,32 +74,130 @@ def copy_cell_style(src_cell, dst_cell):
         dst_cell.number_format = src_cell.number_format
 
 
-def read_delivery_comparison(data_file: Path):
-    wb = load_workbook(data_file, data_only=True)
-    ws = wb.active
-
+def _read_headers(ws):
+    """读取第一行作为表头，返回 {列名: 列号}。"""
     headers = {}
     for c in range(1, ws.max_column + 1):
         val = ws.cell(row=1, column=c).value
         if val:
             headers[str(val).strip()] = c
+    return headers
 
+
+def _is_stop_name(name):
+    """汇总行（None / '-' / '合计'）停止读取。"""
+    if name is None:
+        return True
+    s = str(name).strip()
+    return s in ("-", "合计")
+
+
+def _read_name_rows(ws, headers, extra_cols=None):
+    """逐行读取大客户名称，遇到汇总行停止。
+    返回 list[dict]，每行包含 大客户名称 及 extra_cols 指定的列（值已转为数字）。
+    """
     rows = []
     for r in range(2, ws.max_row + 1):
         name = ws.cell(row=r, column=headers["大客户名称"]).value
-        if name is None or str(name).strip() == "-":
+        if _is_stop_name(name):
             break
-        row_data = {}
-        for h, c in headers.items():
-            row_data[h] = ws.cell(row=r, column=c).value
-        rows.append(row_data)
+        row = {"大客户名称": str(name).strip()}
+        if extra_cols:
+            for col_name in extra_cols:
+                row[col_name] = _to_num(ws.cell(row=r, column=headers[col_name]).value)
+        rows.append(row)
+    return rows
 
+
+def read_product_comparison(data_file: Path):
+    """读取「仓库配送商品大客户对比表」，按大客户聚合，返回 list[dict]。
+
+    聚合后的字段对应目标模板：
+        实际销售金额 → C(实际出库金额/含运费)
+        销售量       → K(出库量)
+        退货量       → L(退货量)
+        实际销售量   → M(实际出库量)
+        销售金额     → N(出库金额)
+        退货金额     → O(退货金额)
+    """
+    wb = load_workbook(data_file, data_only=True)
+    ws = wb.active
+    headers = _read_headers(ws)
+
+    sum_cols = ["销售量", "退货量", "实际销售量", "销售金额", "退货金额", "实际销售金额"]
+
+    customer_data = {}  # name -> {col: sum}
+    for r in range(2, ws.max_row + 1):
+        name = ws.cell(row=r, column=headers["大客户名称"]).value
+        if _is_stop_name(name):
+            break
+        name = str(name).strip()
+        if name not in customer_data:
+            customer_data[name] = {c: 0.0 for c in sum_cols}
+        for col_name in sum_cols:
+            val = ws.cell(row=r, column=headers[col_name]).value
+            if val:
+                try:
+                    customer_data[name][col_name] += float(val)
+                except (ValueError, TypeError):
+                    pass
+    wb.close()
+
+    rows = []
+    for name, d in customer_data.items():
+        rows.append({
+            "大客户名称": name,
+            "实际出库金额": d["实际销售金额"],  # → C
+            "出库量": d["销售量"],              # → K
+            "退货量": d["退货量"],              # → L
+            "实际出库量": d["实际销售量"],      # → M
+            "出库金额": d["销售金额"],          # → N
+            "退货金额": d["退货金额"],          # → O
+        })
+    return rows
+
+
+def read_delivery_comparison(data_file: Path):
+    """读取「仓库配送大客户对比表」，提取 销售出库单数(I) 和 销售退货单数(J)。"""
+    wb = load_workbook(data_file, data_only=True)
+    ws = wb.active
+    headers = _read_headers(ws)
+    rows = _read_name_rows(ws, headers, extra_cols=["销售出库单数", "销售退货单数"])
     wb.close()
     return rows
 
 
-def merge_delivery_into_template(data_rows, template_file: Path, output_file: Path,
-                                  monday: datetime, sunday: datetime):
+def read_delivery_fee(data_file: Path):
+    """读取「仓库配送大客户对比表_配送费」，返回 {大客户名称: {配送次数, 运费金额}}。
+
+    配送次数(E) ← 出库量, 运费金额(F) ← 实际出库金额
+    """
+    wb = load_workbook(data_file, data_only=True)
+    ws = wb.active
+    headers = _read_headers(ws)
+
+    fee_map = {}
+    for r in range(2, ws.max_row + 1):
+        name = ws.cell(row=r, column=headers["大客户名称"]).value
+        if _is_stop_name(name):
+            break
+        fee_map[str(name).strip()] = {
+            "配送次数": _to_num(ws.cell(row=r, column=headers["出库量"]).value),     # → E
+            "运费金额": _to_num(ws.cell(row=r, column=headers["实际出库金额"]).value),  # → F
+        }
+    wb.close()
+    return fee_map
+
+
+def merge_delivery_into_template(product_rows, delivery_rows, template_file: Path,
+                                  output_file: Path, monday: datetime, sunday: datetime,
+                                  fee_data: dict = None):
+    """将三个数据源合并写入模板。
+
+    product_rows:  来自 仓库配送商品大客户对比表（聚合后），提供 C, K, L, M, N, O
+    delivery_rows: 来自 仓库配送大客户对比表，提供 I(销售出库单数), J(销售退货单数)
+    fee_data:      来自 仓库配送大客户对比表_配送费，提供 E(配送次数), F(运费金额)
+    """
     wb = load_workbook(template_file, rich_text=True)
     ws = wb.active
 
@@ -122,39 +207,48 @@ def merge_delivery_into_template(data_rows, template_file: Path, output_file: Pa
     sample_height = ws.row_dimensions[SAMPLE_ROW].height
     totals_cells = list(ws.iter_rows(min_row=TOTALS_ROW, max_row=TOTALS_ROW))[0]
 
-    data_rows_sorted = sorted(
-        data_rows,
-        key=lambda r: float(r.get("实际出库金额", 0) or 0),
-        reverse=True,
-    )
+    # 按 实际出库金额(C) 降序排列
+    data_rows_sorted = sorted(product_rows,
+                              key=lambda r: float(r.get("实际出库金额", 0) or 0),
+                              reverse=True)
     data_count = len(data_rows_sorted)
 
-    for merge in list(ws.merged_cells.ranges):
-        if merge.min_col in (7, 8):
-            ws.unmerge_cells(str(merge))
+    # 将 delivery_rows 转为 {name: row} 以便按名称查找 I, J
+    delivery_map = {str(r["大客户名称"]).strip(): r for r in delivery_rows}
 
     ws.delete_rows(SAMPLE_ROW, 2)
     ws.insert_rows(DATA_START_ROW, data_count)
 
     for i, row_data in enumerate(data_rows_sorted):
         r = DATA_START_ROW + i
+        name = str(row_data.get("大客户名称", "")).strip()
         ws.cell(row=r, column=1).value = f"=ROW()-3"
-        ws.cell(row=r, column=2).value = row_data.get("大客户名称")
+        ws.cell(row=r, column=2).value = name
 
-        amount = row_data.get("实际出库金额")
-        ws.cell(row=r, column=3).value = float(amount) if amount else None
+        # C(3) = 实际出库金额/含运费  ← 商品对比表聚合
+        ws.cell(row=r, column=3).value = _to_num(row_data.get("实际出库金额"))
 
-        c_letter = "C"
-        f_letter = "F"
-        ws.cell(row=r, column=4).value = f"={c_letter}{r}-{f_letter}{r}"
+        # E(5) = 配送次数, F(6) = 运费金额  ← 配送费表
+        fee_info = fee_data.get(name) if fee_data else None
+        if fee_info:
+            ws.cell(row=r, column=5).value = fee_info.get("配送次数")
+            ws.cell(row=r, column=6).value = fee_info.get("运费金额")
 
-        ws.cell(row=r, column=9).value = _to_num(row_data.get("销售出库单数"))
-        ws.cell(row=r, column=10).value = _to_num(row_data.get("销售退货单数"))
-        ws.cell(row=r, column=11).value = _to_num(row_data.get("出库量"))
-        ws.cell(row=r, column=12).value = _to_num(row_data.get("退货量"))
-        ws.cell(row=r, column=13).value = _to_num(row_data.get("实际出库量"))
-        ws.cell(row=r, column=14).value = _to_num(row_data.get("出库金额"))
-        ws.cell(row=r, column=15).value = _to_num(row_data.get("退货金额"))
+        # D(4) = C - F（实际出库额/不含运费）
+        ws.cell(row=r, column=4).value = f"=C{r}-F{r}"
+
+        # I(9) = 销售出库单数, J(10) = 销售退货单数  ← 大客户对比表
+        del_info = delivery_map.get(name)
+        if del_info:
+            ws.cell(row=r, column=9).value = del_info.get("销售出库单数")
+            ws.cell(row=r, column=10).value = del_info.get("销售退货单数")
+
+        # K(11)=出库量, L(12)=退货量, M(13)=实际出库量, N(14)=出库金额, O(15)=退货金额
+        ws.cell(row=r, column=11).value = row_data.get("出库量")
+        ws.cell(row=r, column=12).value = row_data.get("退货量")
+        ws.cell(row=r, column=13).value = row_data.get("实际出库量")
+        ws.cell(row=r, column=14).value = row_data.get("出库金额")
+        ws.cell(row=r, column=15).value = row_data.get("退货金额")
 
         for col_idx in range(1, max_col + 1):
             src_idx = min(col_idx - 1, len(sample_cells) - 1)
@@ -166,16 +260,13 @@ def merge_delivery_into_template(data_rows, template_file: Path, output_file: Pa
     last_data_row = DATA_START_ROW + data_count - 1
 
     ws.cell(row=tr, column=1).value = "合计"
-    for col in [3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15]:
+    for col in [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]:
         letter = get_column_letter(col)
         ws.cell(row=tr, column=col).value = f"=SUM({letter}{DATA_START_ROW}:{letter}{last_data_row})"
 
     for col_idx in range(1, max_col + 1):
         src_idx = min(col_idx - 1, len(totals_cells) - 1)
         copy_cell_style(totals_cells[src_idx], ws.cell(row=tr, column=col_idx))
-
-    ws.merge_cells(f"G{TOTALS_ROW}:G{last_data_row}")
-    ws.merge_cells(f"H{TOTALS_ROW}:H{last_data_row}")
 
     date_sheet = f"{monday.month}.{monday.day}-{sunday.month}.{sunday.day}"
     old_sheet_name = ws.title
@@ -580,17 +671,26 @@ def main():
             logger.info(f"  仓库配送商品大客户对比表 → {dest2}")
             logger.info(f"{'=' * 55}\n")
 
-            # ── 步骤 3：格式化仓库配送大客户对比表 ──
+            # ── 步骤 3：格式化仓库配送商品大客户对比表 ──
             logger.info(f"{'─' * 55}")
-            logger.info(f"  步骤：格式化仓库配送大客户对比表")
+            logger.info(f"  步骤：格式化数据并生成报表")
             logger.info(f"{'─' * 55}")
 
-            logger.info("  读取仓库配送大客户对比表...")
+            logger.info("  读取仓库配送商品大客户对比表（聚合）...")
+            product_rows = read_product_comparison(dest2)
+            logger.info(f"  共 {len(product_rows)} 个大客户（商品聚合）")
+
+            logger.info("  读取仓库配送大客户对比表（订单数）...")
             delivery_rows = read_delivery_comparison(dest)
-            logger.info(f"  共 {len(delivery_rows)} 行大客户数据")
+            logger.info(f"  共 {len(delivery_rows)} 个大客户")
+
+            logger.info("  读取配送费数据...")
+            fee_data = read_delivery_fee(dest_fee)
+            logger.info(f"  共 {len(fee_data)} 条配送费数据")
 
             formatted_output = OUTPUT_DIR / date_range_str / f"工厂配送兔司家门店货品对比表_{date_range_str}.xlsx"
-            merge_delivery_into_template(delivery_rows, TEMPLATE_FILE, formatted_output, monday, sunday)
+            merge_delivery_into_template(product_rows, delivery_rows, TEMPLATE_FILE,
+                                         formatted_output, monday, sunday, fee_data)
             logger.info(f"  格式化输出 → {formatted_output}")
 
             logger.info(f"{'=' * 55}")
