@@ -17,4 +17,3 @@ if errorlevel 1 (
     echo 完成！文件已保存到当前目录。
     timeout /t 3
 )
-\r
