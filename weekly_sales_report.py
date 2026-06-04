@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from openpyxl import load_workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.utils import get_column_letter
 
 # ─── 日志配置 ───────────────────────────────────────────────────────────────────
@@ -63,7 +64,7 @@ SAMPLE_ROW = 4
 
 SRC_COL_MAP = {
     "大客户名称": "B",
-    "实际出库成本": "C",
+    "实际出库金额": "C",
     "销售出库单数": "I",
     "销售退货单数": "J",
     "出库量": "K",
@@ -112,7 +113,7 @@ def read_delivery_comparison(data_file: Path):
 
 def merge_delivery_into_template(data_rows, template_file: Path, output_file: Path,
                                   monday: datetime, sunday: datetime):
-    wb = load_workbook(template_file)
+    wb = load_workbook(template_file, rich_text=True)
     ws = wb.active
 
     max_col = 15
@@ -123,7 +124,7 @@ def merge_delivery_into_template(data_rows, template_file: Path, output_file: Pa
 
     data_rows_sorted = sorted(
         data_rows,
-        key=lambda r: float(r.get("实际出库成本", 0) or 0),
+        key=lambda r: float(r.get("实际出库金额", 0) or 0),
         reverse=True,
     )
     data_count = len(data_rows_sorted)
@@ -142,8 +143,8 @@ def merge_delivery_into_template(data_rows, template_file: Path, output_file: Pa
         ws.cell(row=r, column=1).value = f"=ROW()-3"
         ws.cell(row=r, column=2).value = row_data.get("大客户名称")
 
-        cost = row_data.get("实际出库成本")
-        ws.cell(row=r, column=3).value = float(cost) if cost else None
+        amount = row_data.get("实际出库金额")
+        ws.cell(row=r, column=3).value = float(amount) if amount else None
 
         c_letter = "C"
         f_letter = "F"
@@ -177,19 +178,25 @@ def merge_delivery_into_template(data_rows, template_file: Path, output_file: Pa
 
     cell_a1 = ws.cell(row=1, column=1)
     if cell_a1.value:
-        old_text = str(cell_a1.value)
         m_start = monday.month
         d_start = monday.day
         m_end = sunday.month
         d_end = sunday.day
         y = monday.year
 
-        new_text = re.sub(
-            r'\d{4}年\d{1,2}月\d{1,2}日至\d{1,2}月\d{1,2}日',
-            f"{y}年{m_start}月{d_start}日至{m_end}月{d_end}日",
-            old_text,
-        )
-        cell_a1.value = new_text
+        date_pattern = r'\d{4}年\d{1,2}月\d{1,2}日至\d{1,2}月\d{1,2}日'
+        date_replacement = f"{y}年{m_start}月{d_start}日至{m_end}月{d_end}日"
+
+        if isinstance(cell_a1.value, CellRichText):
+            new_blocks = []
+            for block in cell_a1.value:
+                if isinstance(block, TextBlock):
+                    new_blocks.append(TextBlock(block.font, re.sub(date_pattern, date_replacement, block.text)))
+                elif isinstance(block, str):
+                    new_blocks.append(re.sub(date_pattern, date_replacement, block))
+            cell_a1.value = CellRichText(*new_blocks)
+        else:
+            cell_a1.value = re.sub(date_pattern, date_replacement, str(cell_a1.value))
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_file)
