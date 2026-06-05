@@ -557,11 +557,11 @@ def merge_delivery_into_template(product_rows, delivery_rows, template_file: Pat
             ws.cell(row=r, column=10).value = del_info.get("销售退货单数")
 
         # K(11)=出库量, L(12)=退货量, M(13)=实际出库量, N(14)=出库金额, O(15)=退货金额
-        ws.cell(row=r, column=11).value = row_data.get("出库量")
-        ws.cell(row=r, column=12).value = row_data.get("退货量")
-        ws.cell(row=r, column=13).value = row_data.get("实际出库量")
-        ws.cell(row=r, column=14).value = row_data.get("出库金额")
-        ws.cell(row=r, column=15).value = row_data.get("退货金额")
+        ws.cell(row=r, column=11).value = _to_num(row_data.get("出库量"))
+        ws.cell(row=r, column=12).value = _to_num(row_data.get("退货量"))
+        ws.cell(row=r, column=13).value = _to_num(row_data.get("实际出库量"))
+        ws.cell(row=r, column=14).value = _to_num(row_data.get("出库金额"))
+        ws.cell(row=r, column=15).value = _to_num(row_data.get("退货金额"))
 
         for col_idx in range(1, max_col + 1):
             src_idx = min(col_idx - 1, len(sample_cells) - 1)
