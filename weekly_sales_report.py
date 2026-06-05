@@ -623,6 +623,107 @@ def main():
             download_fee.save_as(dest_fee)
             logger.info(f"  已保存到: {dest_fee}")
 
+            # ── 步骤 1.7：仓库配送大客户对比表_自产品 ──
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  步骤：下载仓库配送大客户对比表_自产品")
+            logger.info(f"{'─' * 55}")
+
+            logger.info("  → 点击重新搜索...")
+            click_by_text(page, "重新搜索", "重新搜索")
+            time.sleep(1.0)
+
+            logger.info("  → 打开分类选择弹框...")
+            select_cat_result = page.evaluate("""
+                (function() {
+                    var btn = document.getElementById('selectCategory');
+                    if (btn) { btn.click(); return 'clicked selectCategory'; }
+                    var els = document.querySelectorAll('*');
+                    for (var i = 0; i < els.length; i++) {
+                        if (els[i].textContent.trim() === '选择分类' && els[i].children.length === 0) {
+                            els[i].click();
+                            return 'clicked tag=' + els[i].tagName;
+                        }
+                    }
+                    return 'not found';
+                })()
+            """)
+            logger.info(f"  [选择分类] → {select_cat_result}")
+            time.sleep(1.0)
+
+            logger.info("  → 取消「配送费」，勾选「冷冻面团」和「蛋糕及面包成品及饼干类」...")
+            page.evaluate("""
+                (function() {
+                    var divs = document.querySelectorAll('.checkBoxDiv');
+                    divs.forEach(function(d) {
+                        var span = d.querySelector('span');
+                        if (!span) return;
+                        var name = span.textContent.trim();
+                        if (name === '配送费') {
+                            if (d.classList.contains('on')) {
+                                d.click();
+                            }
+                        }
+                        if (name === '冷冻面团' || name === '蛋糕及面包成品及饼干类') {
+                            if (!d.classList.contains('on')) {
+                                d.click();
+                            }
+                        }
+                    });
+                })()
+            """)
+
+            check_result = page.evaluate("""
+                (function() {
+                    var divs = document.querySelectorAll('.checkBoxDiv');
+                    var r = [];
+                    divs.forEach(function(d) {
+                        var s = d.querySelector('span');
+                        if (s) {
+                            var name = s.textContent.trim();
+                            if (name === '配送费' || name === '冷冻面团' || name === '蛋糕及面包成品及饼干类') {
+                                r.push(name + ':' + d.classList.contains('on'));
+                            }
+                        }
+                    });
+                    return r.join(' | ');
+                })()
+            """)
+            logger.info(f"    勾选验证: {check_result}")
+
+            logger.info("  → 点击「确定」关闭弹框...")
+            click_by_text(page, "确定", "确定弹框")
+            time.sleep(0.5)
+
+            logger.info("  [查询] 执行查询...")
+            click_by_text(page, "查询", "查询")
+            page.wait_for_load_state("networkidle", timeout=90_000)
+            time.sleep(3)
+
+            logger.info("  [导出] 导出自产品文件...")
+            with page.expect_download(timeout=60_000) as dl_info_self:
+                result = page.evaluate("""
+                    (function() {
+                        var els = document.querySelectorAll('*');
+                        for (var i = 0; i < els.length; i++) {
+                            if (els[i].textContent.trim() === '导出' && els[i].children.length === 0) {
+                                els[i].click();
+                                return 'ok';
+                            }
+                        }
+                        return 'not found';
+                    })()
+                """)
+                logger.info(f"  点击导出: {result}")
+                if result == "not found":
+                    raise RuntimeError("未找到「导出」按钮")
+
+            download_self = dl_info_self.value
+            logger.info(f"  下载文件名: {download_self.suggested_filename}")
+
+            dest_self = output_dir / f"仓库配送大客户对比表_自产品_{date_range_str}.xlsx"
+            download_self.save_as(dest_self)
+            logger.info(f"  已保存到: {dest_self}")
+
             # ── 步骤 2：仓库配送商品大客户对比表 ──
             logger.info(f"{'─' * 55}")
             logger.info(f"  步骤：下载仓库配送商品大客户对比表")
@@ -671,6 +772,7 @@ def main():
             logger.info(f"  周度销售报表下载完成！")
             logger.info(f"  仓库配送大客户对比表 → {dest}")
             logger.info(f"  仓库配送大客户对比表_配送费 → {dest_fee}")
+            logger.info(f"  仓库配送大客户对比表_自产品 → {dest_self}")
             logger.info(f"  仓库配送商品大客户对比表 → {dest2}")
             logger.info(f"{'=' * 55}\n")
 
