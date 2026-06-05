@@ -189,14 +189,34 @@ def read_delivery_fee(data_file: Path):
     return fee_map
 
 
+def read_self_product(data_file: Path):
+    """读取「仓库配送大客户对比表_自产品」，返回 {大客户名称: 自产品金额}。
+
+    自产品金额(H) ← 实际出库金额
+    """
+    wb = load_workbook(data_file, data_only=True)
+    ws = wb.active
+    headers = _read_headers(ws)
+
+    sp_map = {}
+    for r in range(2, ws.max_row + 1):
+        name = ws.cell(row=r, column=headers["大客户名称"]).value
+        if _is_stop_name(name):
+            break
+        sp_map[str(name).strip()] = _to_num(ws.cell(row=r, column=headers["实际出库金额"]).value)
+    wb.close()
+    return sp_map
+
+
 def merge_delivery_into_template(product_rows, delivery_rows, template_file: Path,
                                   output_file: Path, monday: datetime, sunday: datetime,
-                                  fee_data: dict = None):
-    """将三个数据源合并写入模板。
+                                  fee_data: dict = None, self_product_data: dict = None):
+    """将四个数据源合并写入模板。
 
-    product_rows:  来自 仓库配送商品大客户对比表（聚合后），提供 C, K, L, M, N, O
-    delivery_rows: 来自 仓库配送大客户对比表，提供 I(销售出库单数), J(销售退货单数)
-    fee_data:      来自 仓库配送大客户对比表_配送费，提供 E(配送次数), F(运费金额)
+    product_rows:      来自 仓库配送商品大客户对比表（聚合后），提供 C, K, L, M, N, O
+    delivery_rows:     来自 仓库配送大客户对比表，提供 I(销售出库单数), J(销售退货单数)
+    fee_data:          来自 仓库配送大客户对比表_配送费，提供 E(配送次数), F(运费金额)
+    self_product_data: 来自 仓库配送大客户对比表_自产品，提供 H(自产品金额)
     """
     wb = load_workbook(template_file, rich_text=True)
     ws = wb.active
@@ -233,6 +253,12 @@ def merge_delivery_into_template(product_rows, delivery_rows, template_file: Pat
         if fee_info:
             ws.cell(row=r, column=5).value = fee_info.get("配送次数")
             ws.cell(row=r, column=6).value = fee_info.get("运费金额")
+
+        # H(8) = 自产品金额  ← 自产品表
+        if self_product_data:
+            sp_val = self_product_data.get(name)
+            if sp_val is not None:
+                ws.cell(row=r, column=8).value = sp_val
 
         # D(4) = C - F（实际出库额/不含运费）
         ws.cell(row=r, column=4).value = f"=C{r}-F{r}"
@@ -793,9 +819,14 @@ def main():
             fee_data = read_delivery_fee(dest_fee)
             logger.info(f"  共 {len(fee_data)} 条配送费数据")
 
+            logger.info("  读取自产品数据...")
+            self_product_data = read_self_product(dest_self)
+            logger.info(f"  共 {len(self_product_data)} 条自产品数据")
+
             formatted_output = OUTPUT_DIR / date_range_str / f"工厂配送兔司家门店货品对比表_{date_range_str}.xlsx"
             merge_delivery_into_template(product_rows, delivery_rows, TEMPLATE_FILE,
-                                         formatted_output, monday, sunday, fee_data)
+                                         formatted_output, monday, sunday, fee_data,
+                                         self_product_data)
             logger.info(f"  格式化输出 → {formatted_output}")
 
             logger.info(f"{'=' * 55}")
