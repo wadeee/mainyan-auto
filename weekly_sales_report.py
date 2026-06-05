@@ -100,6 +100,16 @@ S2_DATA_START_ROW = 5
 S2_SAMPLE_ROW = 5
 S2_MAX_COL = 26
 
+S2_CATEGORY_ORDER = [
+    "冷冻面团",
+    "蛋糕及面包成品及饼干类",
+    "慕斯+饼干+饮品+其他",
+    "原料铺料",
+    "包材耗材",
+    "工衣模具",
+    "配送费",
+]
+
 # ─── 格式化合并函数 ──────────────────────────────────────────────────────────
 
 
@@ -326,11 +336,17 @@ def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday):
             except (ValueError, TypeError):
                 pass
 
-    # ── 排序：按 EXPORT_CATEGORY_MAP 的分类顺序 ──
-    sorted_products = sorted(
-        pivot.values(),
-        key=lambda p: _get_category_sort_key(p["info"].get("商品分类", "")),
-    )
+    # ── 排序：先按商品大类固定顺序，再按合计销售额降序 ──
+    def _s2_sort_key(p):
+        cat = p["info"].get("商品大类", "") or ""
+        try:
+            cat_idx = S2_CATEGORY_ORDER.index(cat)
+        except ValueError:
+            cat_idx = len(S2_CATEGORY_ORDER)
+        total_amt = sum(s["销售额"] for s in p["stores"].values())
+        return (cat_idx, -total_amt)
+
+    sorted_products = sorted(pivot.values(), key=_s2_sort_key)
 
     data_count = len(sorted_products)
     if data_count == 0:
