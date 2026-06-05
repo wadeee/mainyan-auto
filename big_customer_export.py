@@ -154,7 +154,21 @@ def merge_into_template(report_stores, report_rows,
     totals_cells = list(ws.iter_rows(min_row=TOTALS_ROW, max_row=TOTALS_ROW))[0]
     totals_height = ws.row_dimensions[TOTALS_ROW].height
 
-    all_rows = report_rows
+    # 创建分类优先级映射，按照EXPORT_CATEGORY_MAP中定义的顺序
+    category_priority = {}
+    priority = 0
+    for export_cats in EXPORT_CATEGORY_MAP.values():
+        for cat in export_cats:
+            category_priority[cat] = priority
+            priority += 1
+    max_priority = priority
+
+    # 对数据行按照分类在EXPORT_CATEGORY_MAP中的顺序进行排序
+    def get_category_priority(row_data):
+        category = str(row_data["category"]).strip() if row_data["category"] is not None else ""
+        return category_priority.get(category, max_priority)
+
+    all_rows = sorted(report_rows, key=get_category_priority)
     data_count = len(all_rows)
 
     ws.delete_rows(SAMPLE_ROW, 2)
