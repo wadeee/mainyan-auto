@@ -62,6 +62,44 @@ TOTALS_ROW = 3
 DATA_START_ROW = 4
 SAMPLE_ROW = 4
 
+CUSTOMER_NAME_MAP = {
+    "焙满香滨江店": "滨江店",
+    "焙满香广钢店": "广钢店",
+    "兔司家-西樵凰樵圣堡店": "圣堡",
+    "兔司家东莞寮厦店": "莞寮厦店",
+    "兔司家佛山禾仰广场店": "禾仰",
+    "兔司家-信步闲庭店": "信步",
+    "兔司家广园新村店": "广园",
+    "南安市场甜麦面包屋": "南安市场",
+    "兔司家白云尚城店": "尚城店",
+}
+
+STORE_COLUMNS = {
+    "滨江店": (9, 10),
+    "广钢店": (11, 12),
+    "禾仰": (13, 14),
+    "信步": (15, 16),
+    "圣堡": (17, 18),
+    "广园": (19, 20),
+    "尚城店": (21, 22),
+    "莞寮厦店": (23, 24),
+    "南安市场": (25, 26),
+}
+
+EXPORT_CATEGORY_MAP = {
+    "面团": ["冷冻面团", "面团现烤类", "面团包装类", "面团丹麦类", "面团吐司类", "面团定制款类"],
+    "成品面包饼干": ["成品面包类", "饼干类"],
+    "蛋糕": ["蛋糕类"],
+    "物料包材": ["热销类", "慕斯类/外", "冷冻肉类", "冷冻馅料类", "冷藏馅料类", "油脂类", "粉类", "糖类",
+                 "常温馅料类", "干果类", "饼干类/外", "饮品类/外", "其他/外", "专版包材类", "公版包材类",
+                 "工衣工帽围裙", "模具", "保洁用品", "配送费"],
+}
+
+S2_TOTALS_ROW = 4
+S2_DATA_START_ROW = 5
+S2_SAMPLE_ROW = 5
+S2_MAX_COL = 26
+
 # ─── 格式化合并函数 ──────────────────────────────────────────────────────────
 
 
@@ -157,6 +195,33 @@ def read_product_comparison(data_file: Path):
     return rows
 
 
+def read_product_comparison_detail(data_file: Path):
+    """读取「仓库配送商品大客户对比表」原始明细行，不做聚合。
+
+    返回 list[dict]，每行包含：
+        大客户名称, 商品名称, 商品大类, 商品分类, 规格, 单位, 实际销售量, 实际销售金额
+    """
+    wb = load_workbook(data_file, data_only=True)
+    ws = wb.active
+    headers = _read_headers(ws)
+
+    detail_cols = ["大客户名称", "商品名称", "商品大类", "商品分类", "规格", "单位", "实际销售量", "实际销售金额"]
+    rows = []
+    for r in range(2, ws.max_row + 1):
+        name = ws.cell(row=r, column=headers["大客户名称"]).value
+        if _is_stop_name(name):
+            break
+        row = {}
+        for col_name in detail_cols:
+            val = ws.cell(row=r, column=headers[col_name]).value
+            row[col_name] = val
+        row["大客户名称"] = str(row["大客户名称"]).strip()
+        row["商品名称"] = str(row["商品名称"]).strip()
+        rows.append(row)
+    wb.close()
+    return rows
+
+
 def read_delivery_comparison(data_file: Path):
     """读取「仓库配送大客户对比表」，提取 销售出库单数(I) 和 销售退货单数(J)。"""
     wb = load_workbook(data_file, data_only=True)
@@ -208,20 +273,158 @@ def read_self_product(data_file: Path):
     return sp_map
 
 
+def _get_category_sort_key(product_category):
+    """返回 (大类序号, 子分类序号) 用于按 EXPORT_CATEGORY_MAP 排序。"""
+    for group_idx, (_group, subcats) in enumerate(EXPORT_CATEGORY_MAP.items()):
+        for sub_idx, sub in enumerate(subcats):
+            if sub == product_category:
+                return (group_idx, sub_idx)
+    return (999, 0)
+
+
+def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday):
+    """将 B 表明细数据透视后写入模板的第二个 sheet。"""
+    ws = wb[wb.sheetnames[1]]
+
+    # 解除所有合并单元格，避免 delete_rows/insert_rows 后 MergedCell 只读问题
+    s2_merged = list(ws.merged_cells.ranges)
+    for mr in s2_merged:
+        ws.unmerge_cells(str(mr))
+
+    # ── 按商品名称分组（透视）──
+    pivot = {}  # {商品名称: {"info": {...}, "stores": {缩写: {销量, 销售额}}}}
+    for row in product_detail_rows:
+        pname = row["商品名称"]
+        store_short = CUSTOMER_NAME_MAP.get(row["大客户名称"])
+        if not store_short:
+            continue
+
+        if pname not in pivot:
+            pivot[pname] = {
+                "info": {
+                    "商品名称": pname,
+                    "商品大类": row.get("商品大类"),
+                    "商品分类": row.get("商品分类"),
+                    "规格": row.get("规格"),
+                    "单位": row.get("单位"),
+                },
+                "stores": {},
+            }
+        stores = pivot[pname]["stores"]
+        if store_short not in stores:
+            stores[store_short] = {"销量": 0.0, "销售额": 0.0}
+        qty = row.get("实际销售量")
+        amt = row.get("实际销售金额")
+        if qty:
+            try:
+                stores[store_short]["销量"] += float(qty)
+            except (ValueError, TypeError):
+                pass
+        if amt:
+            try:
+                stores[store_short]["销售额"] += float(amt)
+            except (ValueError, TypeError):
+                pass
+
+    # ── 排序：按 EXPORT_CATEGORY_MAP 的分类顺序 ──
+    sorted_products = sorted(
+        pivot.values(),
+        key=lambda p: _get_category_sort_key(p["info"].get("商品分类", "")),
+    )
+
+    data_count = len(sorted_products)
+    if data_count == 0:
+        return
+
+    # ── 保存样例行格式 ──
+    sample_row_num = S2_SAMPLE_ROW
+    sample_cells = list(ws.iter_rows(min_row=sample_row_num, max_row=sample_row_num))[0]
+    sample_height = ws.row_dimensions[sample_row_num].height
+
+    # ── 计算要删除的样例行数（从 S2_SAMPLE_ROW 到 max_row，但 max_row 可能 > 实际样例）──
+    sample_count = ws.max_row - S2_SAMPLE_ROW + 1
+    ws.delete_rows(S2_SAMPLE_ROW, sample_count)
+    ws.insert_rows(S2_DATA_START_ROW, data_count)
+
+    # ── 销量列字母列表（I,K,M,O,Q,S,U,W,Y）──
+    qty_letters = [get_column_letter(c) for c in range(9, 27, 2)]
+    amt_letters = [get_column_letter(c) for c in range(10, 27, 2)]
+
+    for i, product in enumerate(sorted_products):
+        r = S2_DATA_START_ROW + i
+        info = product["info"]
+
+        ws.cell(row=r, column=1).value = f"=ROW()-4"
+        ws.cell(row=r, column=2).value = info["商品名称"]
+        ws.cell(row=r, column=3).value = info.get("商品大类")
+        ws.cell(row=r, column=4).value = info.get("商品分类")
+        ws.cell(row=r, column=5).value = info.get("规格")
+        ws.cell(row=r, column=6).value = info.get("单位")
+
+        # G(7) = 合计数量, H(8) = 合计销售额 (公式)
+        ws.cell(row=r, column=7).value = f"=SUM({','.join(c + str(r) for c in qty_letters)})"
+        ws.cell(row=r, column=8).value = f"=SUM({','.join(c + str(r) for c in amt_letters)})"
+
+        # 各门店数据
+        for store_short, (qty_col, amt_col) in STORE_COLUMNS.items():
+            store_data = product["stores"].get(store_short)
+            if store_data:
+                qty_val = _to_num(store_data["销量"])
+                amt_val = _to_num(store_data["销售额"])
+                if qty_val is not None:
+                    ws.cell(row=r, column=qty_col).value = qty_val
+                if amt_val is not None:
+                    ws.cell(row=r, column=amt_col).value = amt_val
+
+        # 复制格式
+        for col_idx in range(1, S2_MAX_COL + 1):
+            src_idx = min(col_idx - 1, len(sample_cells) - 1)
+            copy_cell_style(sample_cells[src_idx], ws.cell(row=r, column=col_idx))
+        if sample_height:
+            ws.row_dimensions[r].height = sample_height
+
+    # ── 更新合计行(Row 4) SUM 范围 ──
+    last_data_row = S2_DATA_START_ROW + data_count - 1
+    ws.cell(row=S2_TOTALS_ROW, column=1).value = "合计"
+    for col in range(7, S2_MAX_COL + 1):
+        letter = get_column_letter(col)
+        ws.cell(row=S2_TOTALS_ROW, column=col).value = (
+            f"=SUM({letter}{S2_DATA_START_ROW}:{letter}{last_data_row})"
+        )
+
+    # 恢复 Sheet 2 合并单元格
+    ws.merge_cells("A1:Z1")
+    for col_letter in ["A", "B", "C", "D", "E", "F"]:
+        ws.merge_cells(f"{col_letter}2:{col_letter}3")
+    ws.merge_cells("G2:H2")
+    for start_col in range(9, 27, 2):
+        sl = get_column_letter(start_col)
+        el = get_column_letter(start_col + 1)
+        ws.merge_cells(f"{sl}2:{el}2")
+    ws.merge_cells("A4:F4")
+
+
 def merge_delivery_into_template(product_rows, delivery_rows, template_file: Path,
                                   output_file: Path, monday: datetime, sunday: datetime,
-                                  fee_data: dict = None, self_product_data: dict = None):
-    """将四个数据源合并写入模板。
+                                  fee_data: dict = None, self_product_data: dict = None,
+                                  product_detail_rows: list = None):
+    """将多个数据源合并写入模板。
 
-    product_rows:      来自 仓库配送商品大客户对比表（聚合后），提供 C, K, L, M, N, O
-    delivery_rows:     来自 仓库配送大客户对比表，提供 I(销售出库单数), J(销售退货单数)
-    fee_data:          来自 仓库配送大客户对比表_配送费，提供 E(配送次数), F(运费金额)
-    self_product_data: 来自 仓库配送大客户对比表_自产品，提供 H(自产品金额)
+    product_rows:        来自 仓库配送商品大客户对比表（聚合后），提供 C, K, L, M, N, O
+    delivery_rows:       来自 仓库配送大客户对比表，提供 I(销售出库单数), J(销售退货单数)
+    fee_data:            来自 仓库配送大客户对比表_配送费，提供 E(配送次数), F(运费金额)
+    self_product_data:   来自 仓库配送大客户对比表_自产品，提供 H(自产品金额)
+    product_detail_rows: 来自 仓库配送商品大客户对比表（明细），填入 Sheet 2
     """
     wb = load_workbook(template_file, rich_text=True)
     ws = wb.active
 
     max_col = 15
+
+    # 解除所有合并单元格，避免 delete_rows/insert_rows 后 MergedCell 只读问题
+    merged_ranges = list(ws.merged_cells.ranges)
+    for mr in merged_ranges:
+        ws.unmerge_cells(str(mr))
 
     sample_cells = list(ws.iter_rows(min_row=SAMPLE_ROW, max_row=SAMPLE_ROW))[0]
     sample_height = ws.row_dimensions[SAMPLE_ROW].height
@@ -323,6 +526,36 @@ def merge_delivery_into_template(product_rows, delivery_rows, template_file: Pat
             cell_a1.value = CellRichText(*new_blocks)
         else:
             cell_a1.value = re.sub(date_pattern, date_replacement, str(cell_a1.value))
+
+    # 恢复 Sheet 1 标题行合并
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_col)
+
+    # ── Sheet 2: 填充商品对比明细 ──
+    if product_detail_rows:
+        fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday)
+
+    # ── Sheet 2 & Sheet 3: 日期替换（sheet名 + A1标题）──
+    date_sheet = f"{monday.month}.{monday.day}-{sunday.month}.{sunday.day}"
+    date_pattern = r'\d{4}年\d{1,2}月\d{1,2}日至\d{1,2}月\d{1,2}日'
+    date_replacement = f"{monday.year}年{monday.month}月{monday.day}日至{sunday.month}月{sunday.day}日"
+
+    for sheet_idx in [1, 2]:
+        if sheet_idx >= len(wb.sheetnames):
+            break
+        s = wb[wb.sheetnames[sheet_idx]]
+        s.title = re.sub(r'\d{1,2}\.\d{1,2}-\d{1,2}\.\d{1,2}', date_sheet, s.title)
+        cell = s.cell(row=1, column=1)
+        if cell.value:
+            if isinstance(cell.value, CellRichText):
+                new_blocks = []
+                for block in cell.value:
+                    if isinstance(block, TextBlock):
+                        new_blocks.append(TextBlock(block.font, re.sub(date_pattern, date_replacement, block.text)))
+                    elif isinstance(block, str):
+                        new_blocks.append(re.sub(date_pattern, date_replacement, block))
+                cell.value = CellRichText(*new_blocks)
+            else:
+                cell.value = re.sub(date_pattern, date_replacement, str(cell.value))
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_file)
@@ -823,10 +1056,14 @@ def main():
             self_product_data = read_self_product(dest_self)
             logger.info(f"  共 {len(self_product_data)} 条自产品数据")
 
+            logger.info("  读取商品大客户对比表明细...")
+            product_detail_rows = read_product_comparison_detail(dest2)
+            logger.info(f"  共 {len(product_detail_rows)} 条明细行")
+
             formatted_output = OUTPUT_DIR / date_range_str / f"工厂配送兔司家门店货品对比表_{date_range_str}.xlsx"
             merge_delivery_into_template(product_rows, delivery_rows, TEMPLATE_FILE,
                                          formatted_output, monday, sunday, fee_data,
-                                         self_product_data)
+                                         self_product_data, product_detail_rows)
             logger.info(f"  格式化输出 → {formatted_output}")
 
             logger.info(f"{'=' * 55}")
