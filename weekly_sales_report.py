@@ -237,6 +237,9 @@ def merge_delivery_into_template(product_rows, delivery_rows, template_file: Pat
         # D(4) = C - F（实际出库额/不含运费）
         ws.cell(row=r, column=4).value = f"=C{r}-F{r}"
 
+        # G(7) = C - F - H（外购品金额）
+        ws.cell(row=r, column=7).value = f"=C{r}-F{r}-H{r}"
+
         # I(9) = 销售出库单数, J(10) = 销售退货单数  ← 大客户对比表
         del_info = delivery_map.get(name)
         if del_info:
