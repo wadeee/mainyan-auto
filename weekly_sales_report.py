@@ -293,7 +293,9 @@ def _get_category_sort_key(product_category):
 
 
 def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday):
-    """将 B 表明细数据透视后写入模板的第二个 sheet。"""
+    """将 B 表明细数据透视后写入模板的第二个 sheet。
+    返回 sorted_products 列表供 S3 使用。
+    """
     ws = wb[wb.sheetnames[1]]
 
     # 解除所有合并单元格，避免 delete_rows/insert_rows 后 MergedCell 只读问题
@@ -350,7 +352,7 @@ def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday):
 
     data_count = len(sorted_products)
     if data_count == 0:
-        return
+        return []
 
     # ── 保存样例行格式 ──
     sample_row_num = S2_SAMPLE_ROW
@@ -418,6 +420,72 @@ def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday):
         el = get_column_letter(start_col + 1)
         ws.merge_cells(f"{sl}2:{el}2")
     ws.merge_cells("A4:F4")
+
+    return sorted_products
+
+
+S3_TOTALS_ROW = 3
+S3_DATA_START_ROW = 4
+S3_SAMPLE_ROW = 4
+S3_MAX_COL = 8
+
+
+def fill_sales_ranking_sheet(wb, sorted_products):
+    """将 S2 透视数据按销售额降序写入 S3（门店产品销售排行表）。"""
+    ws = wb[wb.sheetnames[2]]
+
+    s3_merged = list(ws.merged_cells.ranges)
+    for mr in s3_merged:
+        ws.unmerge_cells(str(mr))
+
+    data_count = len(sorted_products)
+    if data_count == 0:
+        return
+
+    sample_cells = list(ws.iter_rows(min_row=S3_SAMPLE_ROW, max_row=S3_SAMPLE_ROW))[0]
+    sample_height = ws.row_dimensions[S3_SAMPLE_ROW].height
+
+    sample_count = ws.max_row - S3_SAMPLE_ROW + 1
+    ws.delete_rows(S3_SAMPLE_ROW, sample_count)
+    ws.insert_rows(S3_DATA_START_ROW, data_count)
+
+    # 按合计销售额降序（排行表）
+    ranked = sorted(sorted_products, key=lambda p: -sum(s["销售额"] for s in p["stores"].values()))
+
+    for i, product in enumerate(ranked):
+        r = S3_DATA_START_ROW + i
+        info = product["info"]
+
+        total_qty = sum(s["销量"] for s in product["stores"].values())
+        total_amt = sum(s["销售额"] for s in product["stores"].values())
+
+        ws.cell(row=r, column=1).value = f"=ROW()-3"
+        ws.cell(row=r, column=2).value = info["商品名称"]
+        ws.cell(row=r, column=3).value = info.get("商品大类")
+        ws.cell(row=r, column=4).value = info.get("商品分类")
+        ws.cell(row=r, column=5).value = info.get("规格")
+        ws.cell(row=r, column=6).value = info.get("单位")
+        ws.cell(row=r, column=7).value = _to_num(total_qty)
+        ws.cell(row=r, column=8).value = _to_num(total_amt)
+
+        for col_idx in range(1, S3_MAX_COL + 1):
+            src_idx = min(col_idx - 1, len(sample_cells) - 1)
+            copy_cell_style(sample_cells[src_idx], ws.cell(row=r, column=col_idx))
+        if sample_height:
+            ws.row_dimensions[r].height = sample_height
+
+    # 更新合计行(Row 3) SUM 范围
+    last_data_row = S3_DATA_START_ROW + data_count - 1
+    ws.cell(row=S3_TOTALS_ROW, column=1).value = "合计"
+    for col in range(7, S3_MAX_COL + 1):
+        letter = get_column_letter(col)
+        ws.cell(row=S3_TOTALS_ROW, column=col).value = (
+            f"=SUM({letter}{S3_DATA_START_ROW}:{letter}{last_data_row})"
+        )
+
+    # 恢复 S3 合并单元格
+    ws.merge_cells("A1:H1")
+    ws.merge_cells("A3:F3")
 
 
 def merge_delivery_into_template(product_rows, delivery_rows, template_file: Path,
@@ -547,8 +615,13 @@ def merge_delivery_into_template(product_rows, delivery_rows, template_file: Pat
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_col)
 
     # ── Sheet 2: 填充商品对比明细 ──
+    sorted_products = []
     if product_detail_rows:
-        fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday)
+        sorted_products = fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday)
+
+    # ── Sheet 3: 填充销售排行（数据来源于 S2）──
+    if sorted_products:
+        fill_sales_ranking_sheet(wb, sorted_products)
 
     # ── Sheet 2 & Sheet 3: 日期替换（sheet名 + A1标题）──
     date_sheet = f"{monday.month}.{monday.day}-{sunday.month}.{sunday.day}"
