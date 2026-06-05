@@ -449,10 +449,7 @@ def fill_sales_ranking_sheet(wb, sorted_products):
     ws.delete_rows(S3_SAMPLE_ROW, sample_count)
     ws.insert_rows(S3_DATA_START_ROW, data_count)
 
-    # 按合计销售额降序（排行表）
-    ranked = sorted(sorted_products, key=lambda p: -sum(s["销售额"] for s in p["stores"].values()))
-
-    for i, product in enumerate(ranked):
+    for i, product in enumerate(sorted_products):
         r = S3_DATA_START_ROW + i
         info = product["info"]
 
