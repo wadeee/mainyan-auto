@@ -29,7 +29,7 @@ def run_task(days):
     logger.info(f"开始执行任务: days={days}")
     try:
         result = subprocess.run(
-            [sys.executable, Path(__file__).resolve().parent / "product_request_export.py", "--headless", f"--days={days}"],
+            [sys.executable, Path(__file__).resolve().parent / "mainyan_prod_order_statistics.py", "--headless", f"--days={days}"],
             timeout=1800,
             capture_output=True,
         )
