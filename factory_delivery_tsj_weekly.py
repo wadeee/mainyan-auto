@@ -1,15 +1,15 @@
 """
-周度销售报表 - 自动化脚本
+工厂配送兔司家门店周度销售报表 - 自动化脚本
 =====================================
 依赖：pip install playwright && playwright install chromium
 
-自动登录 Pospal 后台，依次完成周度销售报表所需的数据导出与处理。
+自动登录 Pospal 后台，依次完成工厂配送兔司家门店周度销售报表所需的数据导出与处理。
 
 用法：
-    python weekly_sales_report.py                    # 导出本周数据（周一到周日）
-    python weekly_sales_report.py --weeks -1         # 导出上周数据
-    python weekly_sales_report.py --date 2026.06.03  # 根据日期推断所在周
-    python weekly_sales_report.py --headless          # 无头模式（不显示浏览器）
+    python factory_delivery_tsj_weekly.py                    # 导出本周数据（周一到周日）
+    python factory_delivery_tsj_weekly.py --weeks -1         # 导出上周数据
+    python factory_delivery_tsj_weekly.py --date 2026.06.03  # 根据日期推断所在周
+    python factory_delivery_tsj_weekly.py --headless          # 无头模式（不显示浏览器）
 """
 
 import argparse
@@ -31,7 +31,7 @@ LOG_DIR = Path(__file__).resolve().parent / "log"
 LOG_DIR.mkdir(exist_ok=True)
 
 _file_handler = logging.handlers.TimedRotatingFileHandler(
-    LOG_DIR / "weekly_sales_report.log",
+    LOG_DIR / "factory_delivery_tsj_weekly.log",
     when="midnight",
     backupCount=30,
     encoding="utf-8",
@@ -54,8 +54,8 @@ LOGIN_URL = "https://beta69.pospal.cn/"
 DELIVERY_COMPARISON_URL = "https://css69.pospal.cn/EnterpriseReport/DeliveryComparison"
 DELIVERY_PRODUCT_COMPARISON_URL = "https://css69.pospal.cn/EnterpriseReport/DeliveryProductComparison"
 
-OUTPUT_DIR = Path(__file__).resolve().parent / "周度销售报表"
-TEMPLATE_FILE = Path(__file__).resolve().parent / "周度_工厂配送兔司家门店货品对比表及销售排行表_格式化模板.xlsx"
+OUTPUT_DIR = Path(__file__).resolve().parent / "工厂配送兔司家门店周度销售报表"
+TEMPLATE_FILE = Path(__file__).resolve().parent / "工厂配送兔司家门店周度销售报表_格式化模板.xlsx"
 
 HEADER_ROW = 2
 TOTALS_ROW = 3
@@ -775,7 +775,7 @@ def login(page):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Pospal 周度销售报表自动化脚本")
+    parser = argparse.ArgumentParser(description="Pospal 工厂配送兔司家门店周度销售报表自动化脚本")
     parser.add_argument("--weeks", type=int, default=0, help="周偏移量：0=本周，-1=上周（默认0）")
     parser.add_argument("--date", type=str, help="指定日期推断所在周，格式 YYYY.MM.DD")
     parser.add_argument("--headless", action="store_true", help="无头模式（不显示浏览器窗口）")
@@ -791,7 +791,7 @@ def main():
     date_range_str = f"{monday.strftime('%Y-%m-%d')}~{sunday.strftime('%Y-%m-%d')}"
 
     logger.info(f"{'=' * 55}")
-    logger.info(f"  Pospal 周度销售报表")
+    logger.info(f"  Pospal 工厂配送兔司家门店周度销售报表")
     logger.info(f"  目标周：{monday_str} ~ {sunday_str}")
     logger.info(f"  输出根目录：{OUTPUT_DIR}")
     logger.info(f"{'=' * 55}")
@@ -1114,7 +1114,7 @@ def main():
             logger.info(f"  已保存到: {dest2}")
 
             logger.info(f"{'=' * 55}")
-            logger.info(f"  周度销售报表下载完成！")
+            logger.info(f"  工厂配送兔司家门店周度销售报表下载完成！")
             logger.info(f"  仓库配送大客户对比表 → {dest}")
             logger.info(f"  仓库配送大客户对比表_配送费 → {dest_fee}")
             logger.info(f"  仓库配送大客户对比表_自产品 → {dest_self}")
@@ -1146,14 +1146,14 @@ def main():
             product_detail_rows = read_product_comparison_detail(dest2)
             logger.info(f"  共 {len(product_detail_rows)} 条明细行")
 
-            formatted_output = OUTPUT_DIR / date_range_str / f"工厂配送兔司家门店货品对比表_{date_range_str}.xlsx"
+            formatted_output = OUTPUT_DIR / date_range_str / f"工厂配送兔司家门店周度销售报表_{date_range_str}.xlsx"
             merge_delivery_into_template(product_rows, delivery_rows, TEMPLATE_FILE,
                                          formatted_output, monday, sunday, fee_data,
                                          self_product_data, product_detail_rows)
             logger.info(f"  格式化输出 → {formatted_output}")
 
             logger.info(f"{'=' * 55}")
-            logger.info(f"  周度销售报表全部完成！")
+            logger.info(f"  工厂配送兔司家门店周度销售报表全部完成！")
             logger.info(f"{'=' * 55}\n")
 
         except Exception as e:
