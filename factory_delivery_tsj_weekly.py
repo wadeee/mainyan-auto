@@ -326,6 +326,21 @@ def _get_store_order_from_s1(wb):
     return store_order
 
 
+def _s2_style_ref_idx(col_idx, sample_len):
+    """将任意列号映射到 sample_cells 中的样式参照索引。
+
+    列 1~8 (A~H) 直接映射；列 9+ 门店区域按 I/J 两列一组循环：
+    奇数门店列（I, K, M, ...）参照索引 8（即 I 列），
+    偶数门店列（J, L, N, ...）参照索引 9（即 J 列）。
+    如果模板不够宽则兜底到最后一个。
+    """
+    if col_idx <= 8:
+        return min(col_idx - 1, sample_len - 1)
+    offset = (col_idx - 9) % 2  # 0 = 数量列(I), 1 = 销售额列(J)
+    ref = 8 + offset  # 索引 8=I, 9=J
+    return min(ref, sample_len - 1)
+
+
 def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday, store_order):
     """将 B 表明细数据透视后写入模板的第二个 sheet。
     store_order: 门店简称有序列表，决定从 I 列开始的列布局。
@@ -397,13 +412,13 @@ def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday, store
     if data_count == 0:
         return []
 
-    # 保存表头行（1-4）的样式模板，用于向右扩展时复制
-    header_sample_cells = {}
-    for hr in range(1, S2_DATA_START_ROW):
-        header_sample_cells[hr] = list(ws.iter_rows(min_row=hr, max_row=hr))[0]
+    # 保存每行的样式模板（表头行1~3 + 合计行4 + 数据样本行5）
+    row_style_cells = {}
+    for hr in range(1, S2_SAMPLE_ROW + 1):
+        row_style_cells[hr] = list(ws.iter_rows(min_row=hr, max_row=hr))[0]
 
     sample_row_num = S2_SAMPLE_ROW
-    sample_cells = list(ws.iter_rows(min_row=sample_row_num, max_row=sample_row_num))[0]
+    sample_cells = row_style_cells[sample_row_num]
     sample_height = ws.row_dimensions[sample_row_num].height
 
     sample_count = ws.max_row - S2_SAMPLE_ROW + 1
@@ -439,7 +454,7 @@ def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday, store
                     ws.cell(row=r, column=amt_col).value = amt_val
 
         for col_idx in range(1, s2_max_col + 1):
-            src_idx = min(col_idx - 1, len(sample_cells) - 1)
+            src_idx = _s2_style_ref_idx(col_idx, len(sample_cells))
             copy_cell_style(sample_cells[src_idx], ws.cell(row=r, column=col_idx))
         if sample_height:
             ws.row_dimensions[r].height = sample_height
@@ -471,17 +486,13 @@ def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday, store
         ws.merge_cells(f"{sl}2:{el}2")
     ws.merge_cells("A4:F4")
 
-    # 门店多于模板时：为表头行（1~4）的扩展列复制样式
+    # 门店多于模板时：为表头行（1~3）和合计行（4）的扩展列复制样式
     if s2_max_col > original_s2_max_col:
-        for hr in range(1, S2_DATA_START_ROW):
-            src_cells = header_sample_cells[hr]
+        for hr in [1, 2, 3, S2_TOTALS_ROW]:
+            src_cells = row_style_cells.get(hr, sample_cells)
             for c in range(original_s2_max_col + 1, s2_max_col + 1):
-                src_idx = min(c - 1, len(src_cells) - 1)
+                src_idx = _s2_style_ref_idx(c, len(src_cells))
                 copy_cell_style(src_cells[src_idx], ws.cell(row=hr, column=c))
-        # 合计行（row 4）的扩展列也需要样式
-        for c in range(original_s2_max_col + 1, s2_max_col + 1):
-            src_idx = min(c - 1, len(sample_cells) - 1)
-            copy_cell_style(sample_cells[src_idx], ws.cell(row=S2_TOTALS_ROW, column=c))
 
     # 门店少于模板时：清除多余列的值和样式
     if s2_max_col < original_s2_max_col:
