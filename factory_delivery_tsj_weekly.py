@@ -769,7 +769,7 @@ def login(page):
 
     logger.info("[4/4] 点击登录按钮...")
     click_by_text(page, "登 录", "登录")
-    page.wait_for_load_state("networkidle", timeout=30_000)
+    page.wait_for_load_state("networkidle", timeout=120_000)
 
     time.sleep(2)
 
@@ -824,7 +824,7 @@ def main():
 
             logger.info("  [导航] 前往仓库配送大客户对比表...")
             page.goto(DELIVERY_COMPARISON_URL)
-            page.wait_for_load_state("networkidle", timeout=30_000)
+            page.wait_for_load_state("networkidle", timeout=120_000)
             logger.info(f"  已到达 → {page.url}")
 
             logger.info(f"  → 设置完成时间: {monday_str} ~ {sunday_str}...")
@@ -1078,7 +1078,7 @@ def main():
 
             logger.info("  [导航] 前往仓库配送商品大客户对比表...")
             page.goto(DELIVERY_PRODUCT_COMPARISON_URL)
-            page.wait_for_load_state("networkidle", timeout=30_000)
+            page.wait_for_load_state("networkidle", timeout=120_000)
             logger.info(f"  已到达 → {page.url}")
 
             logger.info(f"  → 设置完成时间: {monday_str} ~ {sunday_str}...")

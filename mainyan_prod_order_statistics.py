@@ -572,7 +572,7 @@ def login(page):
 
     logger.info("[4/4] 点击登录按钮...")
     click_by_text(page, "登 录", "登录")
-    page.wait_for_load_state("networkidle", timeout=30_000)
+    page.wait_for_load_state("networkidle", timeout=120_000)
 
     time.sleep(2)
 
@@ -581,7 +581,7 @@ def navigate_to_board(page, board_url: str, board_name: str):
     """导航到指定看板"""
     logger.info(f"  [导航] 前往{board_name}...")
     page.goto(board_url)
-    page.wait_for_load_state("networkidle", timeout=30_000)
+    page.wait_for_load_state("networkidle", timeout=120_000)
     logger.info(f"  已到达 → {page.url}")
 
 
