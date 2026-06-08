@@ -2,12 +2,12 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 
-for /f %%a in ('powershell -NoProfile -Command "(Get-Date).AddMonths(0).ToString('yyyy-MM-dd')"') do set TARGET_DATE=%%a
+for /f %%a in ('powershell -NoProfile -Command "(Get-Date).AddMonths(-1).ToString('yyyy-MM-dd')"') do set TARGET_DATE=%%a
 echo 正在导出 %TARGET_DATE% 工厂配送兔司家门店月度销售报表...
 
 call C:\ProgramData\anaconda3\condabin\conda.bat activate mainyan-auto
 
-python factory_delivery_tsj_monthly.py --headless --months 0 %*
+python factory_delivery_tsj_monthly.py --headless --months -1 %*
 if errorlevel 1 goto :FAIL
 
 echo.
