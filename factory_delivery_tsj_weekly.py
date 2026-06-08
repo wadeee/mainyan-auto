@@ -473,6 +473,23 @@ def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday, store
         ws.cell(row=3, column=qty_col).value = "数量"
         ws.cell(row=3, column=amt_col).value = "销售额"
 
+    # 为所有门店列的表头行（2~3）和合计行（4）统一应用样式
+    # 取消合并后 J2 等非锚点丢失样式，且扩展列是全新单元格——
+    # 直接从第一组门店列（I=col9, J=col10）读取样式并批量复制，在合并前执行
+    for hr in [2, 3, S2_TOTALS_ROW]:
+        ref_qty = ws.cell(row=hr, column=9)
+        ref_amt = ws.cell(row=hr, column=10)
+        if hr == 2:
+            ref_amt = ref_qty
+        for c in range(9, s2_max_col + 1):
+            ref = ref_qty if (c - 9) % 2 == 0 else ref_amt
+            dst = ws.cell(row=hr, column=c)
+            dst.font = copy.copy(ref.font)
+            dst.fill = copy.copy(ref.fill)
+            dst.border = copy.copy(ref.border)
+            dst.alignment = copy.copy(ref.alignment)
+            dst.number_format = ref.number_format
+
     # 恢复 Sheet 2 合并单元格（动态范围）
     last_col_letter = get_column_letter(s2_max_col)
     ws.merge_cells(f"A1:{last_col_letter}1")
@@ -485,14 +502,6 @@ def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday, store
         el = get_column_letter(start_col + 1)
         ws.merge_cells(f"{sl}2:{el}2")
     ws.merge_cells("A4:F4")
-
-    # 门店多于模板时：为表头行（1~3）和合计行（4）的扩展列复制样式
-    if s2_max_col > original_s2_max_col:
-        for hr in [1, 2, 3, S2_TOTALS_ROW]:
-            src_cells = row_style_cells.get(hr, sample_cells)
-            for c in range(original_s2_max_col + 1, s2_max_col + 1):
-                src_idx = _s2_style_ref_idx(c, len(src_cells))
-                copy_cell_style(src_cells[src_idx], ws.cell(row=hr, column=c))
 
     # 门店少于模板时：清除多余列的值和样式
     if s2_max_col < original_s2_max_col:
