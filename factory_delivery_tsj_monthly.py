@@ -459,7 +459,7 @@ def main():
 
             logger.info("  [查询] 执行查询...")
             click_by_text(page, "查询", "查询")
-            page.wait_for_load_state("networkidle", timeout=90_000)
+            page.wait_for_load_state("networkidle", timeout=150_000)
             time.sleep(3)
 
             logger.info("  [导出] 导出文件...")
@@ -568,7 +568,7 @@ def main():
 
             logger.info("  [查询] 执行查询...")
             click_by_text(page, "查询", "查询")
-            page.wait_for_load_state("networkidle", timeout=90_000)
+            page.wait_for_load_state("networkidle", timeout=150_000)
             time.sleep(3)
 
             logger.info("  [导出] 导出配送费文件...")
@@ -669,7 +669,7 @@ def main():
 
             logger.info("  [查询] 执行查询...")
             click_by_text(page, "查询", "查询")
-            page.wait_for_load_state("networkidle", timeout=90_000)
+            page.wait_for_load_state("networkidle", timeout=150_000)
             time.sleep(3)
 
             logger.info("  [导出] 导出自产品文件...")

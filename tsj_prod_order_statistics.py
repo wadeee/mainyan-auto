@@ -497,7 +497,7 @@ def search_and_count_rows(page, target_date: str, btn_id: str = None, max_retrie
             page.evaluate(f"document.getElementById('{btn_id}').click()")
         else:
             click_by_text(page, "查询", "查询")
-        page.wait_for_load_state("networkidle", timeout=90_000)
+        page.wait_for_load_state("networkidle", timeout=150_000)
 
         result = page.evaluate("""
             (function() {
