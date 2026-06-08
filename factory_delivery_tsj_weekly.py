@@ -63,27 +63,33 @@ DATA_START_ROW = 4
 SAMPLE_ROW = 4
 
 CUSTOMER_NAME_MAP = {
-    "焙满香滨江店": "滨江店",
     "焙满香广钢店": "广钢店",
-    "兔司家-西樵凰樵圣堡店": "圣堡",
-    "兔司家东莞寮厦店": "莞寮厦店",
-    "兔司家佛山禾仰广场店": "禾仰",
-    "兔司家-信步闲庭店": "信步",
-    "兔司家广园新村店": "广园",
-    "南安市场甜麦面包屋": "南安市场",
+    "焙满香滨江店": "滨江店",
+    "兔司家东莞寮厦店": "寮厦店",
+    "兔司家海悦城店": "海悦城店",
+    "兔司家-西樵凰樵圣堡店": "圣堡店",
+    "兔司家佛山禾仰广场店": "禾仰店",
+    "兔司家东莞凤岗店": "凤岗店",
+    "兔司家-信步闲庭店": "信步店",
+    "兔司家-萝岗和苑店": "萝岗和苑店",
+    "兔司家金碧新城店": "金碧店",
+    "兔司家广园新村店": "广园店",
     "兔司家白云尚城店": "尚城店",
-}
-
-STORE_COLUMNS = {
-    "滨江店": (9, 10),
-    "广钢店": (11, 12),
-    "禾仰": (13, 14),
-    "信步": (15, 16),
-    "圣堡": (17, 18),
-    "广园": (19, 20),
-    "尚城店": (21, 22),
-    "莞寮厦店": (23, 24),
-    "南安市场": (25, 26),
+    "南安市场甜麦面包屋": "南安市场店",
+    "南村店番禺区": "南村店",
+    "花都保利城": "花都保利城店",
+    "兔司家花都花侨店": "花都花侨店",
+    "增城包多多店": "包多多店",
+    "包多多2店": "包多多2店",
+    "兔司家佛山同济广场店": "同济店",
+    "兔司家花海湾店": "花海湾店",
+    "兔司家高志大厦店": "高志店",
+    "兔司家珠江花城店": "珠江花城店",
+    "兔司家白云同和店": "同和店",
+    "兔司家保利罗兰店": "保利罗兰店",
+    "兔司家白云永泰店": "永泰店",
+    "兔司家海珠南洲店": "海珠南洲店",
+    "兔司家荔湾国际城店": "国际城店",
 }
 
 EXPORT_CATEGORY_MAP = {
@@ -98,7 +104,6 @@ EXPORT_CATEGORY_MAP = {
 S2_TOTALS_ROW = 4
 S2_DATA_START_ROW = 5
 S2_SAMPLE_ROW = 5
-S2_MAX_COL = 26
 
 S2_CATEGORY_ORDER = [
     "冷冻面团",
@@ -292,19 +297,47 @@ def _get_category_sort_key(product_category):
     return (999, 0)
 
 
-def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday):
+def _get_store_order_from_s1(wb):
+    """从 Sheet 1 数据行中按顺序提取门店列表（使用简称），返回有序列表。"""
+    ws = wb[wb.sheetnames[0]]
+    store_order = []
+    seen = set()
+    for r in range(DATA_START_ROW, ws.max_row + 1):
+        name = ws.cell(row=r, column=2).value
+        if name is None:
+            continue
+        name = str(name).strip()
+        if not name or name == "合计":
+            break
+        short = CUSTOMER_NAME_MAP.get(name, name)
+        if short not in seen:
+            seen.add(short)
+            store_order.append(short)
+    return store_order
+
+
+def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday, store_order):
     """将 B 表明细数据透视后写入模板的第二个 sheet。
+    store_order: 门店简称有序列表，决定从 I 列开始的列布局。
     返回 sorted_products 列表供 S3 使用。
     """
     ws = wb[wb.sheetnames[1]]
 
-    # 解除所有合并单元格，避免 delete_rows/insert_rows 后 MergedCell 只读问题
     s2_merged = list(ws.merged_cells.ranges)
     for mr in s2_merged:
         ws.unmerge_cells(str(mr))
 
-    # ── 按商品名称分组（透视）──
-    pivot = {}  # {商品名称: {"info": {...}, "stores": {缩写: {销量, 销售额}}}}
+    # 根据 store_order 动态构建列映射: {简称: (销量列, 销售额列)}
+    store_columns = {}
+    for idx, short_name in enumerate(store_order):
+        qty_col = 9 + idx * 2
+        amt_col = 10 + idx * 2
+        store_columns[short_name] = (qty_col, amt_col)
+
+    store_count = len(store_order)
+    s2_max_col = 8 + store_count * 2  # 最后一列
+
+    pivot = {}
     for row in product_detail_rows:
         pname = row["商品名称"]
         store_short = CUSTOMER_NAME_MAP.get(row["大客户名称"])
@@ -338,7 +371,6 @@ def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday):
             except (ValueError, TypeError):
                 pass
 
-    # ── 排序：先按商品大类固定顺序，再按合计销售额降序 ──
     def _s2_sort_key(p):
         cat = p["info"].get("商品大类", "") or ""
         try:
@@ -354,19 +386,17 @@ def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday):
     if data_count == 0:
         return []
 
-    # ── 保存样例行格式 ──
     sample_row_num = S2_SAMPLE_ROW
     sample_cells = list(ws.iter_rows(min_row=sample_row_num, max_row=sample_row_num))[0]
     sample_height = ws.row_dimensions[sample_row_num].height
 
-    # ── 计算要删除的样例行数（从 S2_SAMPLE_ROW 到 max_row，但 max_row 可能 > 实际样例）──
     sample_count = ws.max_row - S2_SAMPLE_ROW + 1
     ws.delete_rows(S2_SAMPLE_ROW, sample_count)
     ws.insert_rows(S2_DATA_START_ROW, data_count)
 
-    # ── 销量列字母列表（I,K,M,O,Q,S,U,W,Y）──
-    qty_letters = [get_column_letter(c) for c in range(9, 27, 2)]
-    amt_letters = [get_column_letter(c) for c in range(10, 27, 2)]
+    # 动态销量/销售额列字母列表
+    qty_letters = [get_column_letter(9 + i * 2) for i in range(store_count)]
+    amt_letters = [get_column_letter(10 + i * 2) for i in range(store_count)]
 
     for i, product in enumerate(sorted_products):
         r = S2_DATA_START_ROW + i
@@ -379,12 +409,10 @@ def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday):
         ws.cell(row=r, column=5).value = info.get("规格")
         ws.cell(row=r, column=6).value = info.get("单位")
 
-        # G(7) = 合计数量, H(8) = 合计销售额 (公式)
         ws.cell(row=r, column=7).value = f"=SUM({','.join(c + str(r) for c in qty_letters)})"
         ws.cell(row=r, column=8).value = f"=SUM({','.join(c + str(r) for c in amt_letters)})"
 
-        # 各门店数据
-        for store_short, (qty_col, amt_col) in STORE_COLUMNS.items():
+        for store_short, (qty_col, amt_col) in store_columns.items():
             store_data = product["stores"].get(store_short)
             if store_data:
                 qty_val = _to_num(store_data["销量"])
@@ -394,28 +422,32 @@ def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday):
                 if amt_val is not None:
                     ws.cell(row=r, column=amt_col).value = amt_val
 
-        # 复制格式
-        for col_idx in range(1, S2_MAX_COL + 1):
+        for col_idx in range(1, s2_max_col + 1):
             src_idx = min(col_idx - 1, len(sample_cells) - 1)
             copy_cell_style(sample_cells[src_idx], ws.cell(row=r, column=col_idx))
         if sample_height:
             ws.row_dimensions[r].height = sample_height
 
-    # ── 更新合计行(Row 4) SUM 范围 ──
     last_data_row = S2_DATA_START_ROW + data_count - 1
     ws.cell(row=S2_TOTALS_ROW, column=1).value = "合计"
-    for col in range(7, S2_MAX_COL + 1):
+    for col in range(7, s2_max_col + 1):
         letter = get_column_letter(col)
         ws.cell(row=S2_TOTALS_ROW, column=col).value = (
             f"=SUM({letter}{S2_DATA_START_ROW}:{letter}{last_data_row})"
         )
 
-    # 恢复 Sheet 2 合并单元格
-    ws.merge_cells("A1:Z1")
+    # 写入门店简称到表头 (第3行对应各门店名称)
+    for short_name, (qty_col, _amt_col) in store_columns.items():
+        ws.cell(row=3, column=qty_col).value = short_name
+
+    # 恢复 Sheet 2 合并单元格（动态范围）
+    last_col_letter = get_column_letter(s2_max_col)
+    ws.merge_cells(f"A1:{last_col_letter}1")
     for col_letter in ["A", "B", "C", "D", "E", "F"]:
         ws.merge_cells(f"{col_letter}2:{col_letter}3")
     ws.merge_cells("G2:H2")
-    for start_col in range(9, 27, 2):
+    for idx in range(store_count):
+        start_col = 9 + idx * 2
         sl = get_column_letter(start_col)
         el = get_column_letter(start_col + 1)
         ws.merge_cells(f"{sl}2:{el}2")
@@ -427,16 +459,27 @@ def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday):
 S3_TOTALS_ROW = 3
 S3_DATA_START_ROW = 4
 S3_SAMPLE_ROW = 4
-S3_MAX_COL = 8
 
 
-def fill_sales_ranking_sheet(wb, sorted_products):
-    """将 S2 透视数据按销售额降序写入 S3（门店产品销售排行表）。"""
+def fill_sales_ranking_sheet(wb, sorted_products, store_order):
+    """将 S2 透视数据按销售额降序写入 S3（门店产品销售排行表）。
+    store_order: 门店简称有序列表，决定从 I 列开始的列布局。
+    """
     ws = wb[wb.sheetnames[2]]
 
     s3_merged = list(ws.merged_cells.ranges)
     for mr in s3_merged:
         ws.unmerge_cells(str(mr))
+
+    # 动态构建列映射
+    store_columns = {}
+    for idx, short_name in enumerate(store_order):
+        qty_col = 9 + idx * 2
+        amt_col = 10 + idx * 2
+        store_columns[short_name] = (qty_col, amt_col)
+
+    store_count = len(store_order)
+    s3_max_col = 8 + store_count * 2
 
     data_count = len(sorted_products)
     if data_count == 0:
@@ -449,12 +492,12 @@ def fill_sales_ranking_sheet(wb, sorted_products):
     ws.delete_rows(S3_SAMPLE_ROW, sample_count)
     ws.insert_rows(S3_DATA_START_ROW, data_count)
 
+    qty_letters = [get_column_letter(9 + i * 2) for i in range(store_count)]
+    amt_letters = [get_column_letter(10 + i * 2) for i in range(store_count)]
+
     for i, product in enumerate(sorted_products):
         r = S3_DATA_START_ROW + i
         info = product["info"]
-
-        total_qty = sum(s["销量"] for s in product["stores"].values())
-        total_amt = sum(s["销售额"] for s in product["stores"].values())
 
         ws.cell(row=r, column=1).value = f"=ROW()-3"
         ws.cell(row=r, column=2).value = info["商品名称"]
@@ -462,26 +505,47 @@ def fill_sales_ranking_sheet(wb, sorted_products):
         ws.cell(row=r, column=4).value = info.get("商品分类")
         ws.cell(row=r, column=5).value = info.get("规格")
         ws.cell(row=r, column=6).value = info.get("单位")
-        ws.cell(row=r, column=7).value = _to_num(total_qty)
-        ws.cell(row=r, column=8).value = _to_num(total_amt)
 
-        for col_idx in range(1, S3_MAX_COL + 1):
+        ws.cell(row=r, column=7).value = f"=SUM({','.join(c + str(r) for c in qty_letters)})"
+        ws.cell(row=r, column=8).value = f"=SUM({','.join(c + str(r) for c in amt_letters)})"
+
+        for store_short, (qty_col, amt_col) in store_columns.items():
+            store_data = product["stores"].get(store_short)
+            if store_data:
+                qty_val = _to_num(store_data["销量"])
+                amt_val = _to_num(store_data["销售额"])
+                if qty_val is not None:
+                    ws.cell(row=r, column=qty_col).value = qty_val
+                if amt_val is not None:
+                    ws.cell(row=r, column=amt_col).value = amt_val
+
+        for col_idx in range(1, s3_max_col + 1):
             src_idx = min(col_idx - 1, len(sample_cells) - 1)
             copy_cell_style(sample_cells[src_idx], ws.cell(row=r, column=col_idx))
         if sample_height:
             ws.row_dimensions[r].height = sample_height
 
-    # 更新合计行(Row 3) SUM 范围
     last_data_row = S3_DATA_START_ROW + data_count - 1
     ws.cell(row=S3_TOTALS_ROW, column=1).value = "合计"
-    for col in range(7, S3_MAX_COL + 1):
+    for col in range(7, s3_max_col + 1):
         letter = get_column_letter(col)
         ws.cell(row=S3_TOTALS_ROW, column=col).value = (
             f"=SUM({letter}{S3_DATA_START_ROW}:{letter}{last_data_row})"
         )
 
-    # 恢复 S3 合并单元格
-    ws.merge_cells("A1:H1")
+    # 写入门店简称到表头 (第2行对应各门店名称)
+    for short_name, (qty_col, _amt_col) in store_columns.items():
+        ws.cell(row=2, column=qty_col).value = short_name
+
+    # 恢复 S3 合并单元格（动态范围）
+    last_col_letter = get_column_letter(s3_max_col)
+    ws.merge_cells(f"A1:{last_col_letter}1")
+    ws.merge_cells("G2:H2")
+    for idx in range(store_count):
+        start_col = 9 + idx * 2
+        sl = get_column_letter(start_col)
+        el = get_column_letter(start_col + 1)
+        ws.merge_cells(f"{sl}2:{el}2")
     ws.merge_cells("A3:F3")
 
 
@@ -613,12 +677,13 @@ def merge_delivery_into_template(product_rows, delivery_rows, template_file: Pat
 
     # ── Sheet 2: 填充商品对比明细 ──
     sorted_products = []
+    store_order = _get_store_order_from_s1(wb)
     if product_detail_rows:
-        sorted_products = fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday)
+        sorted_products = fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday, store_order)
 
     # ── Sheet 3: 填充销售排行（数据来源于 S2）──
     if sorted_products:
-        fill_sales_ranking_sheet(wb, sorted_products)
+        fill_sales_ranking_sheet(wb, sorted_products, store_order)
 
     # ── Sheet 2 & Sheet 3: 日期替换（sheet名 + A1标题）──
     date_sheet = f"{monday.month}.{monday.day}-{sunday.month}.{sunday.day}"
