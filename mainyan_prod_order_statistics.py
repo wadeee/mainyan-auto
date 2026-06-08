@@ -760,7 +760,7 @@ def export_and_save(page, target_date: str, file_prefix: str, *, confirm_after_e
     daily_output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"  → 输出至: {daily_output_dir}")
 
-    with page.expect_download(timeout=60_000) as dl_info:
+    with page.expect_download(timeout=180_000) as dl_info:
         result = page.evaluate("""
             (function() {
                 var els = document.querySelectorAll('*');

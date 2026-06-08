@@ -466,7 +466,7 @@ def main():
             output_dir = OUTPUT_DIR / date_range_str / "原始下载"
             output_dir.mkdir(parents=True, exist_ok=True)
 
-            with page.expect_download(timeout=60_000) as dl_info:
+            with page.expect_download(timeout=180_000) as dl_info:
                 result = page.evaluate("""
                     (function() {
                         var els = document.querySelectorAll('*');
@@ -572,7 +572,7 @@ def main():
             time.sleep(3)
 
             logger.info("  [导出] 导出配送费文件...")
-            with page.expect_download(timeout=60_000) as dl_info_fee:
+            with page.expect_download(timeout=180_000) as dl_info_fee:
                 result = page.evaluate("""
                     (function() {
                         var els = document.querySelectorAll('*');
@@ -673,7 +673,7 @@ def main():
             time.sleep(3)
 
             logger.info("  [导出] 导出自产品文件...")
-            with page.expect_download(timeout=60_000) as dl_info_self:
+            with page.expect_download(timeout=180_000) as dl_info_self:
                 result = page.evaluate("""
                     (function() {
                         var els = document.querySelectorAll('*');
