@@ -812,6 +812,8 @@ def main():
             accept_downloads=True,
         )
         page = context.new_page()
+        page.set_default_timeout(120000)
+        page.set_default_navigation_timeout(120000)
 
         try:
             login(page)
