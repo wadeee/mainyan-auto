@@ -273,6 +273,7 @@ def merge_delivery_into_template(delivery_rows, template_file: Path,
             cell_a1.value = re.sub(date_pattern, date_replacement, str(cell_a1.value))
 
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_col)
+    ws.merge_cells(start_row=TOTALS_ROW, start_column=1, end_row=TOTALS_ROW, end_column=2)
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_file)

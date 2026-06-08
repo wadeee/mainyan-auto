@@ -708,8 +708,9 @@ def merge_delivery_into_template(product_rows, delivery_rows, template_file: Pat
         else:
             cell_a1.value = re.sub(date_pattern, date_replacement, str(cell_a1.value))
 
-    # 恢复 Sheet 1 标题行合并
+    # 恢复 Sheet 1 合并单元格
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_col)
+    ws.merge_cells(start_row=TOTALS_ROW, start_column=1, end_row=TOTALS_ROW, end_column=2)
 
     # ── Sheet 2: 填充商品对比明细 ──
     sorted_products = []
