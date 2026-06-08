@@ -116,7 +116,7 @@ def read_delivery_comparison(data_file: Path):
     ws = wb.active
     headers = _read_headers(ws)
 
-    sum_cols = ["销售量", "退货量", "实际销售量", "销售金额", "退货金额", "实际销售金额",
+    sum_cols = ["出库量", "退货量", "实际出库量", "出库金额", "退货金额", "实际出库金额",
                 "销售出库单数", "销售退货单数"]
 
     rows = []
@@ -187,7 +187,7 @@ def merge_delivery_into_template(delivery_rows, template_file: Path,
     totals_cells = list(ws.iter_rows(min_row=TOTALS_ROW, max_row=TOTALS_ROW))[0]
 
     data_rows_sorted = sorted(delivery_rows,
-                              key=lambda r: float(r.get("实际销售金额", 0) or 0),
+                              key=lambda r: float(r.get("实际出库金额", 0) or 0),
                               reverse=True)
     data_count = len(data_rows_sorted)
 
@@ -200,8 +200,8 @@ def merge_delivery_into_template(delivery_rows, template_file: Path,
         ws.cell(row=r, column=1).value = f"=ROW()-3"
         ws.cell(row=r, column=2).value = name
 
-        # C(3) = 实际销售金额/含运费
-        ws.cell(row=r, column=3).value = _to_num(row_data.get("实际销售金额"))
+        # C(3) = 实际出库金额/含运费
+        ws.cell(row=r, column=3).value = _to_num(row_data.get("实际出库金额"))
 
         # E(5) = 配送次数, F(6) = 运费金额
         fee_info = fee_data.get(name) if fee_data else None
@@ -225,11 +225,11 @@ def merge_delivery_into_template(delivery_rows, template_file: Path,
         ws.cell(row=r, column=9).value = row_data.get("销售出库单数")
         ws.cell(row=r, column=10).value = row_data.get("销售退货单数")
 
-        # K(11)=销售量, L(12)=退货量, M(13)=实际销售量, N(14)=销售金额, O(15)=退货金额
-        ws.cell(row=r, column=11).value = _to_num(row_data.get("销售量"))
+        # K(11)=出库量, L(12)=退货量, M(13)=实际出库量, N(14)=出库金额, O(15)=退货金额
+        ws.cell(row=r, column=11).value = _to_num(row_data.get("出库量"))
         ws.cell(row=r, column=12).value = _to_num(row_data.get("退货量"))
-        ws.cell(row=r, column=13).value = _to_num(row_data.get("实际销售量"))
-        ws.cell(row=r, column=14).value = _to_num(row_data.get("销售金额"))
+        ws.cell(row=r, column=13).value = _to_num(row_data.get("实际出库量"))
+        ws.cell(row=r, column=14).value = _to_num(row_data.get("出库金额"))
         ws.cell(row=r, column=15).value = _to_num(row_data.get("退货金额"))
 
         for col_idx in range(1, max_col + 1):
