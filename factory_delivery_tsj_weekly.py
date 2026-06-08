@@ -127,6 +127,16 @@ def copy_cell_style(src_cell, dst_cell):
         dst_cell.number_format = src_cell.number_format
 
 
+def clear_cell(cell):
+    from openpyxl.styles import Font, PatternFill, Border, Alignment
+    cell.value = None
+    cell.font = Font()
+    cell.fill = PatternFill()
+    cell.border = Border()
+    cell.alignment = Alignment()
+    cell.number_format = "General"
+
+
 def _read_headers(ws):
     """读取第一行作为表头，返回 {列名: 列号}。"""
     headers = {}
@@ -387,6 +397,11 @@ def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday, store
     if data_count == 0:
         return []
 
+    # 保存表头行（1-4）的样式模板，用于向右扩展时复制
+    header_sample_cells = {}
+    for hr in range(1, S2_DATA_START_ROW):
+        header_sample_cells[hr] = list(ws.iter_rows(min_row=hr, max_row=hr))[0]
+
     sample_row_num = S2_SAMPLE_ROW
     sample_cells = list(ws.iter_rows(min_row=sample_row_num, max_row=sample_row_num))[0]
     sample_height = ws.row_dimensions[sample_row_num].height
@@ -456,11 +471,23 @@ def fill_product_comparison_sheet(wb, product_detail_rows, monday, sunday, store
         ws.merge_cells(f"{sl}2:{el}2")
     ws.merge_cells("A4:F4")
 
-    # 清除模板中多余的门店列（当实际门店数少于模板预留时）
+    # 门店多于模板时：为表头行（1~4）的扩展列复制样式
+    if s2_max_col > original_s2_max_col:
+        for hr in range(1, S2_DATA_START_ROW):
+            src_cells = header_sample_cells[hr]
+            for c in range(original_s2_max_col + 1, s2_max_col + 1):
+                src_idx = min(c - 1, len(src_cells) - 1)
+                copy_cell_style(src_cells[src_idx], ws.cell(row=hr, column=c))
+        # 合计行（row 4）的扩展列也需要样式
+        for c in range(original_s2_max_col + 1, s2_max_col + 1):
+            src_idx = min(c - 1, len(sample_cells) - 1)
+            copy_cell_style(sample_cells[src_idx], ws.cell(row=S2_TOTALS_ROW, column=c))
+
+    # 门店少于模板时：清除多余列的值和样式
     if s2_max_col < original_s2_max_col:
         for r in range(1, ws.max_row + 1):
             for c in range(s2_max_col + 1, original_s2_max_col + 1):
-                ws.cell(row=r, column=c).value = None
+                clear_cell(ws.cell(row=r, column=c))
 
     return sorted_products
 
@@ -525,11 +552,11 @@ def fill_sales_ranking_sheet(wb, sorted_products):
             f"=SUM({letter}{S3_DATA_START_ROW}:{letter}{last_data_row})"
         )
 
-    # 清除模板中 I 列及之后的多余内容
+    # 清除模板中 I 列及之后的多余内容和样式
     if original_s3_max_col > s3_max_col:
         for r in range(1, ws.max_row + 1):
             for c in range(s3_max_col + 1, original_s3_max_col + 1):
-                ws.cell(row=r, column=c).value = None
+                clear_cell(ws.cell(row=r, column=c))
 
     # 恢复 S3 合并单元格（仅 A-H 范围）
     last_col_letter = get_column_letter(s3_max_col)
