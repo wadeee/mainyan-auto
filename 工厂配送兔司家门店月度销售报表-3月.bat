@@ -8,14 +8,12 @@ echo 正在导出 %TARGET_DATE% 工厂配送兔司家门店月度销售报表...
 call C:\ProgramData\anaconda3\condabin\conda.bat activate mainyan-auto
 
 python factory_delivery_tsj_monthly.py --headless --months -3 %*
-if errorlevel 1 goto :FAIL
-
-echo.
-echo 完成！文件已保存到当前目录。
-timeout /t 100
-goto :EOF
-
-:FAIL
-echo.
-echo 任务失败，请查看上方错误信息。
-pause
+if errorlevel 1 (
+    echo.
+    echo 任务失败，请查看上方错误信息。
+    pause
+) else (
+    echo.
+    echo 完成！文件已保存到当前目录。
+    timeout /t 3
+)
