@@ -203,11 +203,11 @@ calibration_*.npy
 args.yaml
 results.csv
 
-/麦安研门店订购商品统计/
-/兔司家门店订购商品统计/
-/工厂配送兔司家门店周度销售报表/
-/工厂配送兔司家门店月度销售报表/
-/麦安研产品销售周度排行/
+/factory/麦安研门店订购商品统计/
+/factory/兔司家门店订购商品统计/
+/factory/工厂配送兔司家门店周度销售报表/
+/factory/工厂配送兔司家门店月度销售报表/
+/store/麦安研门店订购商品统计/
 /log/
 config.env
 /.claude/
