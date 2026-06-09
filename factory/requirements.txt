@@ -12,3 +12,4 @@ pyee==13.0.1
 schedule==1.2.2
 typing_extensions==4.15.0
 userpath==1.9.2
+xlrd==2.0.2
