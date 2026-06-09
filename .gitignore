@@ -211,3 +211,5 @@ results.csv
 /log/
 config.env
 /.claude/
+/factory/log/
+/store/log/
