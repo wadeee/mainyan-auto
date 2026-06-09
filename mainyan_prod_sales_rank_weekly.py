@@ -174,36 +174,57 @@ def login(page):
 
 
 def select_store(page, store_full_name: str):
-    """从门店下拉中选择指定门店：用 Playwright 原生 select_option 选择。"""
+    """从自定义 div 下拉 (#ddl_subUsers) 中选择指定门店。"""
     logger.info(f"  → 选择门店: {store_full_name}")
 
-    # 找到含「全部门店」placeholder 的 <select> 并用 Playwright API 选择
-    select_locator = page.locator("select").filter(has=page.locator(f"option:text-is('全部门店')"))
-    count = select_locator.count()
-    logger.info(f"    找到含「全部门店」的 select: {count} 个")
+    # 1. 点击下拉框展开
+    dropdown = page.locator("#ddl_subUsers")
+    dropdown.click()
+    time.sleep(0.5)
 
-    if count > 0:
-        sel = select_locator.first
-        sel.select_option(label=store_full_name)
-        logger.info(f"    门店选择完成: {store_full_name}")
+    # 2. 先取消所有已选中的 li（带 on class 的），确保单选
+    page.evaluate("""
+        (function() {
+            var lis = document.querySelectorAll('#ddl_subUsers .selectBox li');
+            lis.forEach(function(li) {
+                if (li.classList.contains('on')) li.click();
+            });
+        })()
+    """)
+    time.sleep(0.3)
+
+    # 3. 点击目标门店的 li
+    target_li = page.locator(f"#ddl_subUsers .selectBox li[title='{store_full_name}']")
+    if target_li.count() > 0:
+        target_li.click()
+        logger.info(f"    门店已选中: {store_full_name}")
     else:
-        # 备选：尝试用 option 文本部分匹配
-        all_selects = page.locator("select")
-        matched = False
-        for i in range(all_selects.count()):
-            s = all_selects.nth(i)
-            options_text = s.evaluate("""
-                sel => Array.from(sel.options).map(o => o.textContent.trim()).join(' | ')
-            """)
-            if "全部门店" in options_text or store_full_name in options_text:
-                s.select_option(label=store_full_name)
-                logger.info(f"    门店选择完成（备选匹配）: {store_full_name}")
-                matched = True
-                break
-        if not matched:
-            logger.warning(f"    未找到门店下拉框，可用 select 内容已打印在上方")
+        # title 里 &nbsp; 可能导致精确匹配失败，用 JS 模糊匹配
+        click_result = page.evaluate(f"""
+            (function() {{
+                var lis = document.querySelectorAll('#ddl_subUsers .selectBox li');
+                for (var i = 0; i < lis.length; i++) {{
+                    var t = lis[i].textContent.replace(/\\u00a0/g, ' ').trim();
+                    if (t === '{store_full_name}') {{
+                        lis[i].click();
+                        return 'clicked: ' + t;
+                    }}
+                }}
+                var names = [];
+                for (var i = 0; i < lis.length; i++) names.push(lis[i].textContent.replace(/\\u00a0/g, ' ').trim());
+                return 'not found in: ' + names.join(', ');
+            }})()
+        """)
+        logger.info(f"    模糊匹配: {click_result}")
 
-    time.sleep(1)
+    time.sleep(0.3)
+
+    # 4. 点击「关闭」收起下拉
+    close_btn = page.locator("#ddl_subUsers .bottomBar .btnGrey14")
+    if close_btn.count() > 0:
+        close_btn.click()
+        logger.info("    下拉框已关闭")
+    time.sleep(0.5)
 
 
 def click_advanced_search(page):
@@ -478,7 +499,7 @@ def main():
                 download = dl_info.value
                 logger.info(f"  下载文件名: {download.suggested_filename}")
 
-                dest = output_dir / f"商品报损周度统计_{store['short']}_{date_range_str}.xlsx"
+                dest = output_dir / f"商品报损周度统计_{store['short']}_{date_range_str}.xls"
                 download.save_as(dest)
                 logger.info(f"  已保存到: {dest}")
 
