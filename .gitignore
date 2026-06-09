@@ -213,3 +213,4 @@ config.env
 /.claude/
 /factory/log/
 /store/log/
+/mainyan-auto.zip
