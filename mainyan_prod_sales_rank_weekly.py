@@ -174,49 +174,34 @@ def login(page):
 
 
 def select_store(page, store_full_name: str):
-    """从门店下拉中选择指定门店（支持 <select> 和自定义下拉）。"""
+    """从门店下拉中选择指定门店：用 Playwright 原生 select_option 选择。"""
     logger.info(f"  → 选择门店: {store_full_name}")
 
-    result = page.evaluate(f"""
-        (function() {{
-            var selects = document.querySelectorAll('select');
-            for (var i = 0; i < selects.length; i++) {{
-                var options = selects[i].querySelectorAll('option');
-                for (var j = 0; j < options.length; j++) {{
-                    if (options[j].textContent.trim().indexOf('全部门店') >= 0) {{
-                        for (var k = 0; k < options.length; k++) {{
-                            if (options[k].textContent.trim() === '{store_full_name}') {{
-                                selects[i].value = options[k].value;
-                                selects[i].dispatchEvent(new Event('change', {{bubbles: true}}));
-                                return 'selected via select';
-                            }}
-                        }}
-                        return 'store option not found in select';
-                    }}
-                }}
-            }}
-            return 'select_not_found';
-        }})()
-    """)
-    logger.info(f"    门店选择: {result}")
+    # 找到含「全部门店」placeholder 的 <select> 并用 Playwright API 选择
+    select_locator = page.locator("select").filter(has=page.locator(f"option:text-is('全部门店')"))
+    count = select_locator.count()
+    logger.info(f"    找到含「全部门店」的 select: {count} 个")
 
-    if result == "select_not_found":
-        logger.info("    尝试自定义下拉...")
-        click_by_text(page, "全部门店", "全部门店下拉")
-        time.sleep(0.5)
-        result2 = page.evaluate(f"""
-            (function() {{
-                var els = document.querySelectorAll('*');
-                for (var i = 0; i < els.length; i++) {{
-                    if (els[i].textContent.trim() === '{store_full_name}' && els[i].children.length === 0) {{
-                        els[i].click();
-                        return 'selected';
-                    }}
-                }}
-                return 'not found';
-            }})()
-        """)
-        logger.info(f"    自定义下拉: {result2}")
+    if count > 0:
+        sel = select_locator.first
+        sel.select_option(label=store_full_name)
+        logger.info(f"    门店选择完成: {store_full_name}")
+    else:
+        # 备选：尝试用 option 文本部分匹配
+        all_selects = page.locator("select")
+        matched = False
+        for i in range(all_selects.count()):
+            s = all_selects.nth(i)
+            options_text = s.evaluate("""
+                sel => Array.from(sel.options).map(o => o.textContent.trim()).join(' | ')
+            """)
+            if "全部门店" in options_text or store_full_name in options_text:
+                s.select_option(label=store_full_name)
+                logger.info(f"    门店选择完成（备选匹配）: {store_full_name}")
+                matched = True
+                break
+        if not matched:
+            logger.warning(f"    未找到门店下拉框，可用 select 内容已打印在上方")
 
     time.sleep(1)
 
