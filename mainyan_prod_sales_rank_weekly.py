@@ -213,7 +213,7 @@ def fill_template(sale_rows, discard_map, template_file: Path, output_file: Path
         if cat in grouped:
             grouped[cat].append(row)
     for cat in CATEGORY_ORDER:
-        grouped[cat].sort(key=lambda r: float(r.get("商品总售价") or 0), reverse=True)
+        grouped[cat].sort(key=lambda r: float(r.get("销售数量") or 0), reverse=True)
 
     all_sorted = []
     for cat in CATEGORY_ORDER:
@@ -651,7 +651,7 @@ def main():
             logger.info(f"{'─' * 55}")
 
             for i, store in enumerate(STORES):
-                logger.info(f"\n{'─' * 40}")
+                logger.info(f"{'─' * 40}")
                 logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['short']} ({store['full']})")
                 logger.info(f"{'─' * 40}")
 
@@ -686,12 +686,12 @@ def main():
                 logger.info(f"  已保存到: {dest}")
 
             # ── Part 2：商品报损周度统计（3个门店）──────────────────────────
-            logger.info(f"\n{'─' * 55}")
+            logger.info(f"{'─' * 55}")
             logger.info(f"  Part 2：下载商品报损周度统计")
             logger.info(f"{'─' * 55}")
 
             for i, store in enumerate(STORES):
-                logger.info(f"\n{'─' * 40}")
+                logger.info(f"{'─' * 40}")
                 logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['short']} ({store['full']})")
                 logger.info(f"{'─' * 40}")
 
@@ -726,7 +726,7 @@ def main():
                 download.save_as(dest)
                 logger.info(f"  已保存到: {dest}")
 
-            logger.info(f"\n{'=' * 55}")
+            logger.info(f"{'=' * 55}")
             logger.info(f"  麦安研产品销售周度排行下载全部完成！")
             logger.info(f"  输出目录: {output_dir}")
             logger.info(f"{'=' * 55}\n")
@@ -737,7 +737,7 @@ def main():
             logger.info(f"{'─' * 55}")
 
             for i, store in enumerate(STORES):
-                logger.info(f"\n{'─' * 40}")
+                logger.info(f"{'─' * 40}")
                 logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['short']}")
                 logger.info(f"{'─' * 40}")
 
@@ -759,7 +759,7 @@ def main():
                 fill_template(sale_rows, discard_map, TEMPLATE_FILE,
                               formatted_output, store["short"], monday, sunday)
 
-            logger.info(f"\n{'=' * 55}")
+            logger.info(f"{'=' * 55}")
             logger.info(f"  麦安研产品销售周度排行全部完成！")
             logger.info(f"{'=' * 55}\n")
 
