@@ -13,9 +13,11 @@
 """
 
 import argparse
+import copy
 import json
 import logging
 import logging.handlers
+import re
 import sys
 import time
 from datetime import datetime, timedelta
@@ -51,6 +53,7 @@ PRODUCT_SALE_URL = "https://beta69.pospal.cn/ReportV2/ProductSale"
 DISCARD_PRODUCT_URL = "https://beta69.pospal.cn/Inventory/DiscardProductCount"
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "麦安研产品销售周度排行"
+TEMPLATE_FILE = Path(__file__).resolve().parent / "麦安研产品销售周度排行_格式化模板.xlsx"
 
 STORES = [
     {"full": "3 - 麦安研（东站宝泰店）", "short": "宝泰店"},
@@ -59,6 +62,226 @@ STORES = [
 ]
 
 SALE_CATEGORIES = ["热销酥类", "现烤面包", "包装面包", "裱花自制"]
+
+CATEGORY_ORDER = ["现烤面包", "热销酥类", "裱花自制", "包装面包"]
+
+HEADER_ROW = 2
+DATA_START_ROW = 3
+SAMPLE_ROWS = {
+    "现烤面包": 3,
+    "热销酥类": 5,
+    "裱花自制": 7,
+    "包装面包": 9,
+}
+
+
+# ─── 格式化合并函数 ──────────────────────────────────────────────────────────
+
+
+def copy_cell_style(src_cell, dst_cell):
+    if src_cell.has_style:
+        dst_cell.font = copy.copy(src_cell.font)
+        dst_cell.fill = copy.copy(src_cell.fill)
+        dst_cell.border = copy.copy(src_cell.border)
+        dst_cell.alignment = copy.copy(src_cell.alignment)
+        dst_cell.number_format = src_cell.number_format
+
+
+def _to_num(val):
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        if f == 0:
+            return None
+        if f == int(f):
+            return int(f)
+        return f
+    except (ValueError, TypeError):
+        return val
+
+
+def read_sale_data(data_file: Path):
+    """读取商品销售周度统计 xlsx，返回 list[dict]。
+
+    每行包含：商品名称(A), 单位(E), 商品分类(F), 销售数量(H), 商品总售价(I)
+    """
+    from openpyxl import load_workbook as _lwb
+    wb = _lwb(data_file, data_only=True)
+    ws = wb.active
+
+    headers = {}
+    for c in range(1, ws.max_column + 1):
+        val = ws.cell(row=1, column=c).value
+        if val:
+            headers[str(val).strip()] = c
+
+    rows = []
+    for r in range(2, ws.max_row + 1):
+        name = ws.cell(row=r, column=headers["商品名称"]).value
+        if name is None:
+            continue
+        name = str(name).strip()
+        if name in ("-", "合计", "总计", ""):
+            continue
+        category = ws.cell(row=r, column=headers["商品分类"]).value
+        if category:
+            category = str(category).strip()
+        if category not in CATEGORY_ORDER:
+            continue
+        rows.append({
+            "商品名称": name,
+            "单位": ws.cell(row=r, column=headers["单位"]).value,
+            "商品分类": category,
+            "销售数量": _to_num(ws.cell(row=r, column=headers["销售数量"]).value),
+            "商品总售价": _to_num(ws.cell(row=r, column=headers["商品总售价"]).value),
+        })
+    wb.close()
+    return rows
+
+
+def read_discard_data(data_file: Path):
+    """读取商品报损周度统计 xls，返回 {商品名称: 报损数量}。"""
+    import xlrd
+    wb = xlrd.open_workbook(str(data_file), encoding_override="gbk")
+    ws = wb.sheet_by_index(0)
+
+    headers = {}
+    for c in range(ws.ncols):
+        val = ws.cell_value(0, c)
+        if val:
+            headers[str(val).strip()] = c
+
+    name_col = headers["商品名称"]
+    qty_col = headers["报损数量"]
+
+    discard_map = {}
+    for r in range(1, ws.nrows):
+        name = ws.cell_value(r, name_col)
+        if not name or str(name).strip() in ("-", "合计", "总计", ""):
+            continue
+        name = str(name).strip()
+        qty = ws.cell_value(r, qty_col)
+        discard_map[name] = _to_num(qty)
+    wb.release_resources()
+    return discard_map
+
+
+def _build_discard_lookup(discard_map, sale_names):
+    """构建报损查找表：精确匹配优先，再尝试报损名称去掉「-规格」后缀来模糊匹配。"""
+    lookup = {}
+    for name in sale_names:
+        if name in discard_map:
+            lookup[name] = discard_map[name]
+
+    remaining = {k: v for k, v in discard_map.items() if k not in sale_names}
+    for discard_name, qty in remaining.items():
+        base = discard_name.split("-")[0].split("（")[0].strip()
+        if base in sale_names and base not in lookup:
+            lookup[base] = qty
+
+    return lookup
+
+
+def fill_template(sale_rows, discard_map, template_file: Path, output_file: Path,
+                  store_short: str, monday: datetime, sunday: datetime):
+    """将销售和报损数据填入模板，按分类分组、按商品总售价降序排列。"""
+    from openpyxl import load_workbook as _lwb
+    from openpyxl.cell.rich_text import CellRichText, TextBlock
+
+    sale_names = set(r["商品名称"] for r in sale_rows)
+    discard_lookup = _build_discard_lookup(discard_map, sale_names)
+
+    wb = _lwb(template_file, rich_text=True)
+    ws = wb.active
+    max_col = 9
+
+    merged_ranges = list(ws.merged_cells.ranges)
+    for mr in merged_ranges:
+        ws.unmerge_cells(str(mr))
+
+    # 保存每个分类的样式模板（每个分类的第一个样例行）
+    category_styles = {}
+    for cat, sample_row in SAMPLE_ROWS.items():
+        category_styles[cat] = list(ws.iter_rows(min_row=sample_row, max_row=sample_row))[0]
+    sample_height = ws.row_dimensions[DATA_START_ROW].height
+
+    # 按分类分组，每个分类内按商品总售价降序排列
+    grouped = {cat: [] for cat in CATEGORY_ORDER}
+    for row in sale_rows:
+        cat = row["商品分类"]
+        if cat in grouped:
+            grouped[cat].append(row)
+    for cat in CATEGORY_ORDER:
+        grouped[cat].sort(key=lambda r: float(r.get("商品总售价") or 0), reverse=True)
+
+    all_sorted = []
+    for cat in CATEGORY_ORDER:
+        all_sorted.extend(grouped[cat])
+
+    data_count = len(all_sorted)
+
+    # 删除样例行(3~10)，插入数据行
+    sample_count = ws.max_row - DATA_START_ROW + 1
+    ws.delete_rows(DATA_START_ROW, sample_count)
+    ws.insert_rows(DATA_START_ROW, data_count)
+
+    for i, row_data in enumerate(all_sorted):
+        r = DATA_START_ROW + i
+        cat = row_data["商品分类"]
+        name = row_data["商品名称"]
+
+        ws.cell(row=r, column=1).value = name                          # A: 商品名称
+        ws.cell(row=r, column=2).value = row_data.get("单位")          # B: 单位
+        ws.cell(row=r, column=3).value = cat                           # C: 商品分类
+        ws.cell(row=r, column=4).value = row_data.get("销售数量")      # D: 销售数量
+        ws.cell(row=r, column=5).value = row_data.get("商品总售价")    # E: 商品总售价
+        ws.cell(row=r, column=6).value = f"=D{r}/7"                   # F: 日均销量（公式）
+        ws.cell(row=r, column=7).value = discard_lookup.get(name)       # G: 报废量
+        ws.cell(row=r, column=8).value = f"=G{r}/(G{r}+D{r})"        # H: 报废率（公式）
+        # I: 备注 留空
+
+        style_cells = category_styles[cat]
+        for col_idx in range(1, max_col + 1):
+            src_idx = min(col_idx - 1, len(style_cells) - 1)
+            copy_cell_style(style_cells[src_idx], ws.cell(row=r, column=col_idx))
+        if sample_height:
+            ws.row_dimensions[r].height = sample_height
+
+    # 更新标题中的门店名和日期
+    cell_a1 = ws.cell(row=1, column=1)
+    m_start = monday.month
+    d_start = monday.day
+    m_end = sunday.month
+    d_end = sunday.day
+
+    week_in_month = (monday.day - 1) // 7 + 1
+    title_text = f"{store_short}{m_start}月份第{week_in_month}周产品销售排行"
+
+    if isinstance(cell_a1.value, CellRichText):
+        old_blocks = list(cell_a1.value)
+        if old_blocks:
+            first = old_blocks[0]
+            if isinstance(first, TextBlock):
+                cell_a1.value = CellRichText(TextBlock(first.font, title_text))
+            else:
+                cell_a1.value = title_text
+        else:
+            cell_a1.value = title_text
+    else:
+        cell_a1.value = title_text
+
+    # 更新 sheet 名称
+    ws.title = f"{store_short}{m_start}月-{week_in_month}"
+
+    # 恢复合并单元格
+    from openpyxl.utils import get_column_letter
+    last_col_letter = get_column_letter(max_col)
+    ws.merge_cells(f"A1:{last_col_letter}1")
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(output_file)
+    logger.info(f"  已生成格式化文件: {output_file}")
 
 
 # ─── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -506,6 +729,38 @@ def main():
             logger.info(f"\n{'=' * 55}")
             logger.info(f"  麦安研产品销售周度排行下载全部完成！")
             logger.info(f"  输出目录: {output_dir}")
+            logger.info(f"{'=' * 55}\n")
+
+            # ── Part 3：格式化数据并生成报表 ──────────────────────────
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  Part 3：格式化数据并生成报表")
+            logger.info(f"{'─' * 55}")
+
+            for i, store in enumerate(STORES):
+                logger.info(f"\n{'─' * 40}")
+                logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['short']}")
+                logger.info(f"{'─' * 40}")
+
+                sale_file = output_dir / f"商品销售周度统计_{store['short']}_{date_range_str}.xlsx"
+                discard_file = output_dir / f"商品报损周度统计_{store['short']}_{date_range_str}.xls"
+
+                logger.info(f"  读取销售数据: {sale_file.name}")
+                sale_rows = read_sale_data(sale_file)
+                logger.info(f"  共 {len(sale_rows)} 条销售记录")
+
+                logger.info(f"  读取报损数据: {discard_file.name}")
+                discard_map = read_discard_data(discard_file)
+                logger.info(f"  共 {len(discard_map)} 条报损记录")
+
+                formatted_output = (
+                    OUTPUT_DIR / date_range_str
+                    / f"麦安研产品销售周度排行_{store['short']}_{date_range_str}.xlsx"
+                )
+                fill_template(sale_rows, discard_map, TEMPLATE_FILE,
+                              formatted_output, store["short"], monday, sunday)
+
+            logger.info(f"\n{'=' * 55}")
+            logger.info(f"  麦安研产品销售周度排行全部完成！")
             logger.info(f"{'=' * 55}\n")
 
         except Exception as e:
