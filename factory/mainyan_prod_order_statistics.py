@@ -202,7 +202,7 @@ def compute_category_sums(detail_file: Path, store_names: set[str]) -> dict:
     for row in ws.iter_rows(min_row=2):
         category = row[1].value  # B列：商品分类
         org = row[5].value  # F列：订货组织
-        amount = row[13].value  # N列：订货金额
+        amount = row[14].value  # N列：订货金额
 
         if category is None or org is None or amount is None:
             continue
@@ -230,7 +230,7 @@ def compute_detail_sums_by_category(detail_file: Path, store_names: set[str]) ->
     for row in ws.iter_rows(min_row=2):
         category = row[1].value
         org = row[5].value
-        amount = row[13].value
+        amount = row[14].value
         if category is None or org is None or amount is None:
             continue
         cat_str = str(category).strip()
