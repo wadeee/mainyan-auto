@@ -214,3 +214,4 @@ config.env
 /factory/log/
 /store/log/
 /mainyan-auto.zip
+/test/
