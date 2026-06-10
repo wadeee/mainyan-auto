@@ -86,18 +86,27 @@ def copy_cell_style(src_cell, dst_cell):
         dst_cell.number_format = src_cell.number_format
 
 
-def read_business_summary_c16(data_file: Path):
-    from openpyxl import load_workbook as _lwb
-    wb = _lwb(data_file, data_only=True)
-    ws = wb.active
-    val = ws.cell(row=16, column=3).value
-    wb.close()
+def _parse_numeric(val):
     if val is None:
         return None
     try:
         return float(str(val).strip())
     except (ValueError, TypeError):
         return val
+
+
+def read_business_summary(data_file: Path):
+    from openpyxl import load_workbook as _lwb
+    wb = _lwb(data_file, data_only=True)
+    ws1 = wb.worksheets[0]
+    ws2 = wb.worksheets[1] if len(wb.worksheets) > 1 else None
+    result = {
+        "c16": _parse_numeric(ws1.cell(row=16, column=3).value),
+        "ws2_c4": _parse_numeric(ws2.cell(row=4, column=3).value) if ws2 else None,
+        "e4": _parse_numeric(ws1.cell(row=4, column=5).value),
+    }
+    wb.close()
+    return result
 
 
 def create_or_open_monthly_file(store, target: datetime, template_file: Path, output_dir: Path):
@@ -177,18 +186,25 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
 
     summary_file = daily_download_dir / f"营业概况_{store['short']}_{date_label}.xlsx"
     if not summary_file.exists():
-        logger.warning(f"  营业概况文件不存在，跳过 G 列填写: {summary_file.name}")
-        c16_value = None
+        logger.warning(f"  营业概况文件不存在，跳过填写: {summary_file.name}")
+        summary = None
     else:
-        c16_value = read_business_summary_c16(summary_file)
-        logger.info(f"  读取 C16 (现金支付) = {c16_value}")
+        summary = read_business_summary(summary_file)
+        logger.info(f"  读取 sheet2 C4 (现金充值) = {summary['ws2_c4']}")
+        logger.info(f"  读取 C16 (现金合计) = {summary['c16']}")
+        logger.info(f"  读取 E4 (充值金额) = {summary['e4']}")
 
     wb = _lwb(monthly_file)
     ws1 = wb.worksheets[0]
 
     row_s1 = day + 4
-    if c16_value is not None:
-        ws1.cell(row=row_s1, column=7).value = c16_value
+    if summary:
+        if summary["ws2_c4"] is not None:
+            ws1.cell(row=row_s1, column=5).value = summary["ws2_c4"]
+        if summary["c16"] is not None:
+            ws1.cell(row=row_s1, column=6).value = summary["c16"]
+        if summary["e4"] is not None:
+            ws1.cell(row=row_s1, column=21).value = summary["e4"]
 
     wb.save(monthly_file)
     wb.close()
