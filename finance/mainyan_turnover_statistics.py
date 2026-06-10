@@ -13,6 +13,8 @@
 """
 
 import argparse
+import calendar
+import copy
 import json
 import logging
 import logging.handlers
@@ -50,12 +52,17 @@ LOGIN_URL = "https://beta69.pospal.cn/"
 BUSINESS_SUMMARY_URL = "https://beta69.pospal.cn/Report/BusinessSummaryV2"
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "麦安研营业统计"
+TEMPLATE_FILE = Path(__file__).resolve().parent / "麦安研营业统计_格式化模板.xlsx"
 
 STORES = [
-    {"full": "3 - 麦安研（东站宝泰店）", "short": "宝泰店"},
-    {"full": "5 - 麦安研（顺德龙江店）", "short": "龙江店"},
-    {"full": "2 - 麦安研（顺德杏坛店）", "short": "杏坛店"},
+    {"full": "3 - 麦安研（东站宝泰店）", "short": "宝泰店", "template_name": "东站宝泰店"},
+    {"full": "5 - 麦安研（顺德龙江店）", "short": "龙江店", "template_name": "顺德龙江店"},
+    {"full": "2 - 麦安研（顺德杏坛店）", "short": "杏坛店", "template_name": "顺德杏坛店"},
 ]
+
+TEMPLATE_STORE_NAME = "东方宝泰店"
+
+WEEKDAY_NAMES = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
 
 
 # ─── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -65,6 +72,127 @@ def get_target_date(days: int = 0, date_str: str = None):
     if date_str:
         return datetime.strptime(date_str, "%Y.%m.%d")
     return datetime.now() + timedelta(days=days)
+
+
+# ─── 格式化合并函数 ──────────────────────────────────────────────────────────
+
+
+def copy_cell_style(src_cell, dst_cell):
+    if src_cell.has_style:
+        dst_cell.font = copy.copy(src_cell.font)
+        dst_cell.fill = copy.copy(src_cell.fill)
+        dst_cell.border = copy.copy(src_cell.border)
+        dst_cell.alignment = copy.copy(src_cell.alignment)
+        dst_cell.number_format = src_cell.number_format
+
+
+def read_business_summary_c16(data_file: Path):
+    from openpyxl import load_workbook as _lwb
+    wb = _lwb(data_file, data_only=True)
+    ws = wb.active
+    val = ws.cell(row=16, column=3).value
+    wb.close()
+    if val is None:
+        return None
+    try:
+        return float(str(val).strip())
+    except (ValueError, TypeError):
+        return val
+
+
+def create_or_open_monthly_file(store, target: datetime, template_file: Path, output_dir: Path):
+    year = target.year
+    month = target.month
+    month_str = f"{year}-{month:02d}"
+    month_dir = output_dir / month_str
+    month_dir.mkdir(parents=True, exist_ok=True)
+
+    store_name = store["template_name"]
+    output_file = month_dir / f"麦安研营业统计_{store_name}_{month_str}.xlsx"
+
+    if output_file.exists():
+        logger.info(f"  月度文件已存在，直接打开: {output_file.name}")
+        return output_file, False
+
+    logger.info(f"  月度文件不存在，从模板创建: {output_file.name}")
+    _create_monthly_from_template(template_file, output_file, store_name, year, month)
+    return output_file, True
+
+
+def _create_monthly_from_template(template_file: Path, output_file: Path, store_name: str, year: int, month: int):
+    from openpyxl import load_workbook as _lwb
+
+    wb = _lwb(template_file)
+    days_in_month = calendar.monthrange(year, month)[1]
+
+    ws1 = wb.worksheets[0]
+    ws2 = wb.worksheets[1]
+
+    old_title_1 = ws1.title
+    old_title_2 = ws2.title
+    new_title_1 = old_title_1.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月", f"{year}年{month}月")
+    new_title_2 = old_title_2.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月", f"{year}年{month}月")
+    ws1.title = new_title_1
+    ws2.title = new_title_2
+
+    a1_val_1 = ws1.cell(row=1, column=1).value
+    if a1_val_1 and isinstance(a1_val_1, str):
+        ws1.cell(row=1, column=1).value = a1_val_1.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月", f"{year}年{month}月")
+
+    a1_val_2 = ws2.cell(row=1, column=1).value
+    if a1_val_2 and isinstance(a1_val_2, str):
+        ws2.cell(row=1, column=1).value = a1_val_2.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月", f"{year}年{month}月")
+
+    for day in range(1, 32):
+        row_s1 = day + 4
+        if day <= days_in_month:
+            dt = datetime(year, month, day)
+            ws1.cell(row=row_s1, column=2).value = f"{year}.{month}.{day}"
+            ws1.cell(row=row_s1, column=3).value = WEEKDAY_NAMES[dt.weekday()]
+        else:
+            ws1.cell(row=row_s1, column=2).value = None
+            ws1.cell(row=row_s1, column=3).value = None
+
+    for day in range(1, 32):
+        row_s2 = day + 2
+        if day <= days_in_month:
+            dt = datetime(year, month, day)
+            ws2.cell(row=row_s2, column=1).value = f"{year}.{month}.{day}"
+            ws2.cell(row=row_s2, column=2).value = WEEKDAY_NAMES[dt.weekday()]
+        else:
+            ws2.cell(row=row_s2, column=1).value = None
+            ws2.cell(row=row_s2, column=2).value = None
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(output_file)
+    wb.close()
+    logger.info(f"  已创建月度文件: {output_file}")
+
+
+def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_dir: Path):
+    from openpyxl import load_workbook as _lwb
+
+    day = target.day
+    date_label = target.strftime("%Y-%m-%d")
+
+    summary_file = daily_download_dir / f"营业概况_{store['short']}_{date_label}.xlsx"
+    if not summary_file.exists():
+        logger.warning(f"  营业概况文件不存在，跳过 G 列填写: {summary_file.name}")
+        c16_value = None
+    else:
+        c16_value = read_business_summary_c16(summary_file)
+        logger.info(f"  读取 C16 (现金支付) = {c16_value}")
+
+    wb = _lwb(monthly_file)
+    ws1 = wb.worksheets[0]
+
+    row_s1 = day + 4
+    if c16_value is not None:
+        ws1.cell(row=row_s1, column=7).value = c16_value
+
+    wb.save(monthly_file)
+    wb.close()
+    logger.info(f"  已将第 {day} 天的数据写入: {monthly_file.name}")
 
 
 # ─── 浏览器自动化函数 ────────────────────────────────────────────────────────
@@ -312,6 +440,25 @@ def main():
             logger.info(f"{'=' * 55}")
             logger.info(f"  麦安研营业统计下载全部完成！")
             logger.info(f"  输出目录: {output_dir}")
+            logger.info(f"{'=' * 55}\n")
+
+            # ── Part 2：格式化数据并写入月度统计表 ──────────────────────────
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  Part 2：格式化数据并写入月度统计表")
+            logger.info(f"{'─' * 55}")
+
+            for i, store in enumerate(STORES):
+                logger.info(f"{'─' * 40}")
+                logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['template_name']}")
+                logger.info(f"{'─' * 40}")
+
+                monthly_file, created = create_or_open_monthly_file(
+                    store, target, TEMPLATE_FILE, OUTPUT_DIR
+                )
+                fill_daily_data(monthly_file, target, store, output_dir)
+
+            logger.info(f"{'=' * 55}")
+            logger.info(f"  麦安研营业统计格式化全部完成！")
             logger.info(f"{'=' * 55}\n")
 
         except Exception as e:
