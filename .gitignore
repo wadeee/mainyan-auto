@@ -208,10 +208,12 @@ results.csv
 /factory/工厂配送兔司家门店周度销售报表/
 /factory/工厂配送兔司家门店月度销售报表/
 /store/麦安研产品销售周度排行/
+/finance/麦安研营业统计/
 /log/
-config.env
-/.claude/
 /factory/log/
 /store/log/
+/finance/log/
+config.env
+/.claude/
 /mainyan-auto.zip
 /test/
