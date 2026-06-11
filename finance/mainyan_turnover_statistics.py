@@ -482,12 +482,19 @@ def select_unionpay_store(page, config):
                 close_btn.click()
                 time.sleep(0.3)
 
-    cascader.locator(".el-input__inner").click()
+    search_input = cascader.locator(".el-cascader__search-input")
+    if search_input.count() > 0:
+        search_input.click()
+    else:
+        cascader.locator(".el-input__inner").click(force=True)
     time.sleep(0.5)
 
     panel = page.locator(".el-cascader__dropdown:visible, .el-popper:visible .el-cascader-panel")
     if panel.count() == 0:
-        cascader.locator(".el-input__inner").click()
+        if search_input.count() > 0:
+            search_input.click()
+        else:
+            cascader.locator(".el-input__inner").click(force=True)
         time.sleep(0.5)
 
     if config.get("parent_node"):
