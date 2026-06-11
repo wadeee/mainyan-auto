@@ -75,7 +75,7 @@ UNIONPAY_STORE_CONFIG = [
     },
     {
         "store_short": "杏坛店",
-        "parent_node": None,
+        "parent_node": "总部",
         "select_items": ["麦安研（顺德杏坛店）"],
     },
 ]
