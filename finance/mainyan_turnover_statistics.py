@@ -497,6 +497,21 @@ def select_unionpay_store(page, config):
             cascader.locator(".el-input__inner").click(force=True)
         time.sleep(0.5)
 
+    cleared = page.evaluate("""
+        (function() {
+            var count = 0;
+            var checked = document.querySelectorAll('.el-cascader-node .el-checkbox__input.is-checked');
+            for (var i = 0; i < checked.length; i++) {
+                checked[i].click();
+                count++;
+            }
+            return count;
+        })()
+    """)
+    if cleared > 0:
+        logger.info(f"    清除面板中已选复选框: {cleared} 个")
+        time.sleep(0.5)
+
     if config.get("parent_node"):
         parent = config["parent_node"]
         result = page.evaluate(f"""
@@ -648,46 +663,46 @@ def main():
             output_dir = OUTPUT_DIR / date_label
             output_dir.mkdir(parents=True, exist_ok=True)
 
-            logger.info(f"{'─' * 55}")
-            logger.info(f"  下载营业概况日度统计")
-            logger.info(f"{'─' * 55}")
-
-            for i, store in enumerate(STORES):
-                logger.info(f"{'─' * 40}")
-                logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['short']} ({store['full']})")
-                logger.info(f"{'─' * 40}")
-
-                logger.info("  [导航] 前往营业概况页面...")
-                page.goto(BUSINESS_SUMMARY_URL)
-                page.wait_for_load_state("networkidle", timeout=120_000)
-                logger.info(f"  已到达 → {page.url}")
-
-                select_store(page, store["full"])
-
-                logger.info(f"  → 设置日期: {target_str}...")
-                set_date(page, "开始日期", f"{target_str} 00:00")
-                set_date(page, "结束日期", f"{target_str} 23:59")
-
-                logger.info("  [查询] 执行查询...")
-                click_by_text(page, "查询", "查询")
-                page.wait_for_load_state("networkidle", timeout=150_000)
-                time.sleep(3)
-
-                logger.info("  [导出] 导出文件...")
-                with page.expect_download(timeout=180_000) as dl_info:
-                    click_export(page)
-
-                download = dl_info.value
-                logger.info(f"  下载文件名: {download.suggested_filename}")
-
-                dest = output_dir / f"营业概况_{store['short']}_{date_label}.xlsx"
-                download.save_as(dest)
-                logger.info(f"  已保存到: {dest}")
-
-            logger.info(f"{'=' * 55}")
-            logger.info(f"  营业概况下载全部完成！")
-            logger.info(f"  输出目录: {output_dir}")
-            logger.info(f"{'=' * 55}\n")
+            # logger.info(f"{'─' * 55}")
+            # logger.info(f"  下载营业概况日度统计")
+            # logger.info(f"{'─' * 55}")
+            #
+            # for i, store in enumerate(STORES):
+            #     logger.info(f"{'─' * 40}")
+            #     logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['short']} ({store['full']})")
+            #     logger.info(f"{'─' * 40}")
+            #
+            #     logger.info("  [导航] 前往营业概况页面...")
+            #     page.goto(BUSINESS_SUMMARY_URL)
+            #     page.wait_for_load_state("networkidle", timeout=120_000)
+            #     logger.info(f"  已到达 → {page.url}")
+            #
+            #     select_store(page, store["full"])
+            #
+            #     logger.info(f"  → 设置日期: {target_str}...")
+            #     set_date(page, "开始日期", f"{target_str} 00:00")
+            #     set_date(page, "结束日期", f"{target_str} 23:59")
+            #
+            #     logger.info("  [查询] 执行查询...")
+            #     click_by_text(page, "查询", "查询")
+            #     page.wait_for_load_state("networkidle", timeout=150_000)
+            #     time.sleep(3)
+            #
+            #     logger.info("  [导出] 导出文件...")
+            #     with page.expect_download(timeout=180_000) as dl_info:
+            #         click_export(page)
+            #
+            #     download = dl_info.value
+            #     logger.info(f"  下载文件名: {download.suggested_filename}")
+            #
+            #     dest = output_dir / f"营业概况_{store['short']}_{date_label}.xlsx"
+            #     download.save_as(dest)
+            #     logger.info(f"  已保存到: {dest}")
+            #
+            # logger.info(f"{'=' * 55}")
+            # logger.info(f"  营业概况下载全部完成！")
+            # logger.info(f"  输出目录: {output_dir}")
+            # logger.info(f"{'=' * 55}\n")
 
             # ── Part 1.5：下载银豹付交易账单 ─────────────────────────────
             logger.info(f"{'─' * 55}")
