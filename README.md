@@ -3,3 +3,6 @@
 1. 双击 `auto-install.bat`
 
 2. 双击 `auto-install-service.bat`
+
+# 财务 Finance
+
