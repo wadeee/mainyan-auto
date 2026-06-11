@@ -104,7 +104,7 @@ def _to_num(val):
 def read_sale_data(data_file: Path):
     """读取商品销售周度统计 xlsx，返回 list[dict]。
 
-    每行包含：商品名称(A), 单位(E), 商品分类(F), 销售数量(H), 商品总售价(I)
+    每行包含：商品名称(A), 商品条码(B), 单位(E), 商品分类(F), 销售数量(H), 商品总售价(I)
     """
     from openpyxl import load_workbook as _lwb
     wb = _lwb(data_file, data_only=True)
@@ -129,8 +129,12 @@ def read_sale_data(data_file: Path):
             category = str(category).strip()
         if category not in CATEGORY_ORDER:
             continue
+        barcode = ws.cell(row=r, column=headers["商品条码"]).value
+        if barcode is not None:
+            barcode = str(barcode).strip()
         rows.append({
             "商品名称": name,
+            "商品条码": barcode,
             "单位": ws.cell(row=r, column=headers["单位"]).value,
             "商品分类": category,
             "销售数量": _to_num(ws.cell(row=r, column=headers["销售数量"]).value),
@@ -141,7 +145,7 @@ def read_sale_data(data_file: Path):
 
 
 def read_discard_data(data_file: Path):
-    """读取商品报损周度统计 xls，返回 {商品名称: 报损数量}。"""
+    """读取商品报损周度统计 xls，返回 {条码: 报损数量}。"""
     import xlrd
     wb = xlrd.open_workbook(str(data_file), encoding_override="gbk")
     ws = wb.sheet_by_index(0)
@@ -152,34 +156,33 @@ def read_discard_data(data_file: Path):
         if val:
             headers[str(val).strip()] = c
 
-    name_col = headers["商品名称"]
+    barcode_col = headers["条码"]
     qty_col = headers["报损数量"]
 
     discard_map = {}
     for r in range(1, ws.nrows):
-        name = ws.cell_value(r, name_col)
-        if not name or str(name).strip() in ("-", "合计", "总计", ""):
+        barcode = ws.cell_value(r, barcode_col)
+        if not barcode or str(barcode).strip() in ("-", "合计", "总计", ""):
             continue
-        name = str(name).strip()
+        barcode = str(barcode).strip()
         qty = ws.cell_value(r, qty_col)
-        discard_map[name] = _to_num(qty)
+        discard_map[barcode] = _to_num(qty)
     wb.release_resources()
     return discard_map
 
 
-def _build_discard_lookup(discard_map, sale_names):
-    """构建报损查找表：精确匹配优先，再尝试报损名称去掉「-规格」后缀来模糊匹配。"""
+def _build_discard_lookup(discard_map, sale_rows):
+    """构建报损查找表：通过商品条码一对一匹配销售与报损数据。
+
+    discard_map: {条码: 报损数量}
+    sale_rows: list[dict]，每行含 "商品名称" 和 "商品条码"
+    返回: {商品名称: 报损数量}
+    """
     lookup = {}
-    for name in sale_names:
-        if name in discard_map:
-            lookup[name] = discard_map[name]
-
-    remaining = {k: v for k, v in discard_map.items() if k not in sale_names}
-    for discard_name, qty in remaining.items():
-        base = discard_name.split("-")[0].split("（")[0].strip()
-        if base in sale_names and base not in lookup:
-            lookup[base] = qty
-
+    for row in sale_rows:
+        barcode = row.get("商品条码")
+        if barcode and barcode in discard_map:
+            lookup[row["商品名称"]] = discard_map[barcode]
     return lookup
 
 
@@ -189,8 +192,7 @@ def fill_template(sale_rows, discard_map, template_file: Path, output_file: Path
     from openpyxl import load_workbook as _lwb
     from openpyxl.cell.rich_text import CellRichText, TextBlock
 
-    sale_names = set(r["商品名称"] for r in sale_rows)
-    discard_lookup = _build_discard_lookup(discard_map, sale_names)
+    discard_lookup = _build_discard_lookup(discard_map, sale_rows)
 
     wb = _lwb(template_file, rich_text=True)
     ws = wb.active
