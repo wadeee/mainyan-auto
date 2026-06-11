@@ -51,7 +51,7 @@ PASSWORD = "tusijia88"
 
 LOGIN_URL = "https://beta69.pospal.cn/"
 BUSINESS_SUMMARY_URL = "https://beta69.pospal.cn/Report/BusinessSummaryV2"
-UNIONPAY_BILL_URL = "https://beta69.pospal.cn/CloudApp/UnionPayBill"
+UNIONPAY_BILL_URL = "https://cloudapp-pay69.pospal.cn/#/additional/fund-summary?oem=0"
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "麦安研营业统计"
 TEMPLATE_FILE = Path(__file__).resolve().parent / "麦安研营业统计_格式化模板.xlsx"
