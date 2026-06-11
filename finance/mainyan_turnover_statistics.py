@@ -82,6 +82,8 @@ UNIONPAY_STORE_CONFIG = [
 
 TEMPLATE_STORE_NAME = "东方宝泰店"
 
+UNIONPAY_CSV_FIELDS = ["交易金额", "交易退款金额", "有效交易金额", "交易手续费", "优惠金额", "优惠退款金额"]
+
 WEEKDAY_NAMES = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
 
 
@@ -449,8 +451,8 @@ def save_unionpay_bill_csv(data, store_short, date_label, output_dir):
     with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
         writer.writerow(["项目", "金额"])
-        for key, value in data.items():
-            writer.writerow([key, value])
+        for key in UNIONPAY_CSV_FIELDS:
+            writer.writerow([key, data.get(key, 0)])
     logger.info(f"  已保存CSV: {csv_file.name}")
     return csv_file
 
@@ -466,39 +468,53 @@ def read_unionpay_bill_csv(csv_file):
 
 
 def select_unionpay_store(page, config):
-    """在银豹付交易账单页面选择门店（Element UI 树形组件）。"""
+    """在银豹付交易账单页面选择门店（Element UI Cascader 多选组件）。"""
     logger.info(f"  → 选择银豹付门店: {config['select_items']}")
 
-    page.evaluate("""
-        (function() {
-            var checked = document.querySelectorAll('.el-tree .el-checkbox.is-checked');
-            checked.forEach(function(c) {
-                var input = c.querySelector('.el-checkbox__original');
-                if (input) input.click();
-            });
-        })()
-    """)
-    time.sleep(0.3)
+    cascader = page.locator(".el-cascader")
+    existing_tags = cascader.locator(".el-tag__close")
+    tag_count = existing_tags.count()
+    if tag_count > 0:
+        logger.info(f"    清除已有选项 ({tag_count} 个)...")
+        for _ in range(tag_count):
+            close_btn = cascader.locator(".el-tag__close").first
+            if close_btn.count() > 0:
+                close_btn.click()
+                time.sleep(0.3)
+
+    cascader.locator(".el-input__inner").click()
+    time.sleep(0.5)
+
+    panel = page.locator(".el-cascader__dropdown:visible, .el-popper:visible .el-cascader-panel")
+    if panel.count() == 0:
+        cascader.locator(".el-input__inner").click()
+        time.sleep(0.5)
 
     if config.get("parent_node"):
         parent = config["parent_node"]
         result = page.evaluate(f"""
             (function() {{
-                var nodes = document.querySelectorAll('.el-tree-node');
-                for (var i = 0; i < nodes.length; i++) {{
-                    var content = nodes[i].querySelector('.el-tree-node__content');
-                    if (!content) continue;
-                    var label = content.querySelector('.el-checkbox__label');
-                    var text = label ? label.textContent.trim() : content.textContent.trim();
-                    if (text.indexOf('{parent}') >= 0) {{
-                        if (!nodes[i].classList.contains('is-expanded')) {{
-                            var arrow = content.querySelector('.el-tree-node__expand-icon');
-                            if (arrow) arrow.click();
+                var menus = document.querySelectorAll('.el-cascader-menu');
+                if (menus.length === 0) return 'no cascader menu found';
+                var firstMenu = menus[menus.length > 1 ? menus.length - 1 : 0];
+                for (var m = 0; m < menus.length; m++) {{
+                    var nodes = menus[m].querySelectorAll('.el-cascader-node');
+                    for (var i = 0; i < nodes.length; i++) {{
+                        var label = nodes[i].querySelector('.el-cascader-node__label');
+                        var text = label ? label.textContent.trim() : nodes[i].textContent.trim();
+                        if (text === '{parent}') {{
+                            nodes[i].click();
+                            return 'clicked parent: ' + text;
                         }}
-                        return 'expanded: ' + text;
                     }}
                 }}
-                return 'parent not found: {parent}';
+                var allLabels = [];
+                var nodes = document.querySelectorAll('.el-cascader-node');
+                for (var i = 0; i < nodes.length; i++) {{
+                    var label = nodes[i].querySelector('.el-cascader-node__label');
+                    allLabels.push(label ? label.textContent.trim() : nodes[i].textContent.trim());
+                }}
+                return 'parent not found: {parent}. Available: ' + allLabels.join(', ');
             }})()
         """)
         logger.info(f"    展开父节点: {result}")
@@ -507,24 +523,33 @@ def select_unionpay_store(page, config):
     for item_name in config["select_items"]:
         result = page.evaluate(f"""
             (function() {{
-                var nodes = document.querySelectorAll('.el-tree-node__content');
+                var nodes = document.querySelectorAll('.el-cascader-node');
                 for (var i = 0; i < nodes.length; i++) {{
-                    var label = nodes[i].querySelector('.el-checkbox__label');
+                    var label = nodes[i].querySelector('.el-cascader-node__label');
                     var text = label ? label.textContent.trim() : nodes[i].textContent.trim();
                     if (text === '{item_name}') {{
-                        var cb = nodes[i].querySelector('.el-checkbox__original');
-                        if (cb) {{ cb.click(); return 'checked: ' + text; }}
-                        var cbLabel = nodes[i].querySelector('.el-checkbox');
-                        if (cbLabel) {{ cbLabel.click(); return 'clicked checkbox: ' + text; }}
+                        var cb = nodes[i].querySelector('.el-checkbox__input');
+                        if (cb) {{
+                            cb.click();
+                            return 'checked: ' + text;
+                        }}
                         nodes[i].click();
-                        return 'clicked node: ' + text;
+                        return 'clicked: ' + text;
                     }}
                 }}
-                return 'not found: {item_name}';
+                var allLabels = [];
+                for (var i = 0; i < nodes.length; i++) {{
+                    var label = nodes[i].querySelector('.el-cascader-node__label');
+                    allLabels.push(label ? label.textContent.trim() : nodes[i].textContent.trim());
+                }}
+                return 'not found: {item_name}. Available: ' + allLabels.join(', ');
             }})()
         """)
         logger.info(f"    选择: {result}")
-        time.sleep(0.3)
+        time.sleep(0.5)
+
+    page.locator("body").click(position={"x": 0, "y": 0})
+    time.sleep(0.3)
 
 
 def set_vue_date(page, target_str):
