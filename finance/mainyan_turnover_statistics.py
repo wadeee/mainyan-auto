@@ -20,6 +20,7 @@ import json
 import logging
 import logging.handlers
 import re
+import subprocess
 import sys
 import time
 from datetime import datetime, timedelta
@@ -53,6 +54,25 @@ LOGIN_URL = "https://beta69.pospal.cn/"
 BUSINESS_SUMMARY_URL = "https://beta69.pospal.cn/Report/BusinessSummaryV2"
 UNIONPAY_BILL_URL = "https://cloudapp-pay69.pospal.cn/#/additional/fund-summary?oem=0"
 CUSTOMER_SUMMARY_URL = "https://beta69.pospal.cn/CustomerReport/CustomerConsumerSummary"
+MEITUAN_DOWNLOAD_URL = "https://waimaieapp.meituan.com/finance/pc/download"
+
+MEITUAN_STORE_CONFIG = [
+    {
+        "store_short": "宝泰店",
+        "port": 9222,
+        "user_data_dir": r"C:\ChromeDebug",
+    },
+    # {
+    #     "store_short": "龙江店",
+    #     "port": 9223,
+    #     "user_data_dir": r"C:\ChromeDebug_LJ",
+    # },
+    # {
+    #     "store_short": "杏坛店",
+    #     "port": 9224,
+    #     "user_data_dir": r"C:\ChromeDebug_XT",
+    # },
+]
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "麦安研营业统计"
 TEMPLATE_FILE = Path(__file__).resolve().parent / "麦安研营业统计_格式化模板.xlsx"
@@ -795,170 +815,442 @@ def main():
             output_dir = OUTPUT_DIR / "原始下载" / date_label
             output_dir.mkdir(parents=True, exist_ok=True)
 
+            # logger.info(f"{'─' * 55}")
+            # logger.info(f"  下载营业概况日度统计")
+            # logger.info(f"{'─' * 55}")
+            #
+            # for i, store in enumerate(STORES):
+            #     logger.info(f"{'─' * 40}")
+            #     logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['short']} ({store['full']})")
+            #     logger.info(f"{'─' * 40}")
+            #
+            #     logger.info("  [导航] 前往营业概况页面...")
+            #     page.goto(BUSINESS_SUMMARY_URL)
+            #     page.wait_for_load_state("networkidle", timeout=120_000)
+            #     logger.info(f"  已到达 → {page.url}")
+            #
+            #     select_store(page, store["full"])
+            #
+            #     logger.info(f"  → 设置日期: {target_str}...")
+            #     set_date(page, "开始日期", f"{target_str} 00:00")
+            #     set_date(page, "结束日期", f"{target_str} 23:59")
+            #
+            #     logger.info("  [查询] 执行查询...")
+            #     click_by_text(page, "查询", "查询")
+            #     page.wait_for_load_state("networkidle", timeout=150_000)
+            #     time.sleep(3)
+            #
+            #     logger.info("  [导出] 导出文件...")
+            #     with page.expect_download(timeout=180_000) as dl_info:
+            #         click_export(page)
+            #
+            #     download = dl_info.value
+            #     logger.info(f"  下载文件名: {download.suggested_filename}")
+            #
+            #     dest = output_dir / f"营业概况_{store['short']}_{date_label}.xlsx"
+            #     download.save_as(dest)
+            #     logger.info(f"  已保存到: {dest}")
+            #
+            # logger.info(f"{'=' * 55}")
+            # logger.info(f"  营业概况下载全部完成！")
+            # logger.info(f"  输出目录: {output_dir}")
+            # logger.info(f"{'=' * 55}\n")
+            #
+            # # ── Part 1.5：下载银豹付交易账单 ─────────────────────────────
+            # logger.info(f"{'─' * 55}")
+            # logger.info(f"  下载银豹付交易账单")
+            # logger.info(f"{'─' * 55}")
+            #
+            # for i, up_config in enumerate(UNIONPAY_STORE_CONFIG):
+            #     store_short = up_config["store_short"]
+            #     logger.info(f"{'─' * 40}")
+            #     logger.info(f"  门店 {i + 1}/{len(UNIONPAY_STORE_CONFIG)}: {store_short}")
+            #     logger.info(f"{'─' * 40}")
+            #
+            #     logger.info("  [导航] 前往银豹付交易账单页面...")
+            #     page.goto(UNIONPAY_BILL_URL)
+            #     page.wait_for_load_state("networkidle", timeout=120_000)
+            #     time.sleep(2)
+            #
+            #     logger.info(f"  → 设置日期: {target_str}...")
+            #     set_vue_date(page, target_str)
+            #     time.sleep(1)
+            #
+            #     select_unionpay_store(page, up_config)
+            #     time.sleep(0.5)
+            #
+            #     logger.info("  [搜索] 点击搜索...")
+            #     click_by_text(page, "搜索", "搜索")
+            #     page.wait_for_load_state("networkidle", timeout=150_000)
+            #     time.sleep(3)
+            #
+            #     bill_data = scrape_unionpay_bill(page)
+            #     save_unionpay_bill_csv(bill_data, store_short, date_label, output_dir)
+            #
+            # logger.info(f"{'=' * 55}")
+            # logger.info(f"  银豹付交易账单下载全部完成！")
+            # logger.info(f"  输出目录: {output_dir}")
+            # logger.info(f"{'=' * 55}\n")
+            #
+            # # ── Part 1.6：下载会员消费汇总表 ─────────────────────────────
+            # logger.info(f"{'─' * 55}")
+            # logger.info(f"  下载会员消费汇总表")
+            # logger.info(f"{'─' * 55}")
+            #
+            # for i, cs_config in enumerate(CUSTOMER_SUMMARY_STORE_CONFIG):
+            #     store_short = cs_config["store_short"]
+            #     logger.info(f"{'─' * 40}")
+            #     logger.info(f"  门店 {i + 1}/{len(CUSTOMER_SUMMARY_STORE_CONFIG)}: {store_short}")
+            #     logger.info(f"{'─' * 40}")
+            #
+            #     logger.info("  [导航] 前往会员消费汇总表页面...")
+            #     page.goto(CUSTOMER_SUMMARY_URL)
+            #     page.wait_for_load_state("networkidle", timeout=120_000)
+            #     time.sleep(2)
+            #
+            #     select_store_type_consumption(page)
+            #
+            #     select_stores_multi(page, cs_config["select_items"])
+            #
+            #     date_dash = target_str.replace(".", "-")
+            #     logger.info(f"  → 设置统计时间: {date_dash}...")
+            #     result = page.evaluate(f"""
+            #         (function() {{
+            #             function setVal(id, val) {{
+            #                 var inp = document.getElementById(id);
+            #                 if (!inp) return 'not found: ' + id;
+            #                 if (window.jQuery && jQuery.fn.datepicker) {{
+            #                     jQuery(inp).datepicker('setDate', val);
+            #                 }}
+            #                 var nativeSet = Object.getOwnPropertyDescriptor(
+            #                     HTMLInputElement.prototype, 'value').set;
+            #                 nativeSet.call(inp, val);
+            #                 inp.dispatchEvent(new Event('input', {{bubbles: true}}));
+            #                 inp.dispatchEvent(new Event('change', {{bubbles: true}}));
+            #                 inp.dispatchEvent(new Event('blur', {{bubbles: true}}));
+            #                 return inp.value;
+            #             }}
+            #             var r1 = setVal('txt_startDatetime', '{date_dash}');
+            #             var r2 = setVal('txt_endDatetime', '{date_dash}');
+            #             return 'start=' + r1 + ', end=' + r2;
+            #         }})()
+            #     """)
+            #     logger.info(f"  统计时间: {result}")
+            #
+            #     logger.info("  [查询] 执行查询...")
+            #     page.locator("#btnSearch").click()
+            #     page.wait_for_load_state("networkidle", timeout=150_000)
+            #     time.sleep(3)
+            #
+            #     logger.info("  [导出] 点击导出销售单据...")
+            #     click_by_text(page, "导出销售单据", "导出销售单据")
+            #     time.sleep(2)
+            #
+            #     logger.info("  [导出] 点击弹窗中的导出...")
+            #     with page.expect_download(timeout=180_000) as dl_info:
+            #         click_by_text(page, "导出", "弹窗导出")
+            #
+            #     download = dl_info.value
+            #     logger.info(f"  下载文件名: {download.suggested_filename}")
+            #
+            #     dest = output_dir / f"会员消费汇总表_{store_short}_{date_label}.xlsx"
+            #     download.save_as(dest)
+            #     logger.info(f"  已保存到: {dest}")
+            #
+            # logger.info(f"{'=' * 55}")
+            # logger.info(f"  会员消费汇总表下载全部完成！")
+            # logger.info(f"  输出目录: {output_dir}")
+            # logger.info(f"{'=' * 55}\n")
+            #
+            # # ── Part 2：格式化数据并写入月度统计表 ──────────────────────────
+            # logger.info(f"{'─' * 55}")
+            # logger.info(f"  Part 2：格式化数据并写入月度统计表")
+            # logger.info(f"{'─' * 55}")
+            #
+            # for i, store in enumerate(STORES):
+            #     logger.info(f"{'─' * 40}")
+            #     logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['template_name']}")
+            #     logger.info(f"{'─' * 40}")
+            #
+            #     monthly_file, created = create_or_open_monthly_file(
+            #         store, target, TEMPLATE_FILE, OUTPUT_DIR
+            #     )
+            #     fill_daily_data(monthly_file, target, store, output_dir)
+            #
+            # logger.info(f"{'=' * 55}")
+            # logger.info(f"  麦安研营业统计格式化全部完成！")
+            # logger.info(f"{'=' * 55}\n")
+
+            # ── Part 3：下载美团外卖订单明细 ─────────────────────────────
             logger.info(f"{'─' * 55}")
-            logger.info(f"  下载营业概况日度统计")
+            logger.info(f"  Part 3：下载美团外卖订单明细")
             logger.info(f"{'─' * 55}")
 
-            for i, store in enumerate(STORES):
+            for mt_idx, mt_config in enumerate(MEITUAN_STORE_CONFIG):
+                mt_store_short = mt_config["store_short"]
+                mt_port = mt_config["port"]
+                mt_user_data_dir = mt_config["user_data_dir"]
+
                 logger.info(f"{'─' * 40}")
-                logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['short']} ({store['full']})")
-                logger.info(f"{'─' * 40}")
-
-                logger.info("  [导航] 前往营业概况页面...")
-                page.goto(BUSINESS_SUMMARY_URL)
-                page.wait_for_load_state("networkidle", timeout=120_000)
-                logger.info(f"  已到达 → {page.url}")
-
-                select_store(page, store["full"])
-
-                logger.info(f"  → 设置日期: {target_str}...")
-                set_date(page, "开始日期", f"{target_str} 00:00")
-                set_date(page, "结束日期", f"{target_str} 23:59")
-
-                logger.info("  [查询] 执行查询...")
-                click_by_text(page, "查询", "查询")
-                page.wait_for_load_state("networkidle", timeout=150_000)
-                time.sleep(3)
-
-                logger.info("  [导出] 导出文件...")
-                with page.expect_download(timeout=180_000) as dl_info:
-                    click_export(page)
-
-                download = dl_info.value
-                logger.info(f"  下载文件名: {download.suggested_filename}")
-
-                dest = output_dir / f"营业概况_{store['short']}_{date_label}.xlsx"
-                download.save_as(dest)
-                logger.info(f"  已保存到: {dest}")
-
-            logger.info(f"{'=' * 55}")
-            logger.info(f"  营业概况下载全部完成！")
-            logger.info(f"  输出目录: {output_dir}")
-            logger.info(f"{'=' * 55}\n")
-
-            # ── Part 1.5：下载银豹付交易账单 ─────────────────────────────
-            logger.info(f"{'─' * 55}")
-            logger.info(f"  下载银豹付交易账单")
-            logger.info(f"{'─' * 55}")
-
-            for i, up_config in enumerate(UNIONPAY_STORE_CONFIG):
-                store_short = up_config["store_short"]
-                logger.info(f"{'─' * 40}")
-                logger.info(f"  门店 {i + 1}/{len(UNIONPAY_STORE_CONFIG)}: {store_short}")
+                logger.info(f"  美团门店 {mt_idx + 1}/{len(MEITUAN_STORE_CONFIG)}: {mt_store_short}")
                 logger.info(f"{'─' * 40}")
 
-                logger.info("  [导航] 前往银豹付交易账单页面...")
-                page.goto(UNIONPAY_BILL_URL)
-                page.wait_for_load_state("networkidle", timeout=120_000)
-                time.sleep(2)
+                logger.info(f"  启动 Chrome (port={mt_port}, profile={mt_user_data_dir})...")
+                chrome_process = subprocess.Popen([
+                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                    f"--remote-debugging-port={mt_port}",
+                    f"--user-data-dir={mt_user_data_dir}",
+                ])
+                time.sleep(5)
 
-                logger.info(f"  → 设置日期: {target_str}...")
-                set_vue_date(page, target_str)
-                time.sleep(1)
+                chrome_browser = None
+                chrome_page = None
+                try:
+                    logger.info("  连接到 Chrome...")
+                    chrome_browser = pw.chromium.connect_over_cdp(f"http://localhost:{mt_port}")
+                    chrome_context = chrome_browser.contexts[0]
+                    chrome_page = chrome_context.new_page()
+                    chrome_page.set_default_timeout(120000)
+                    chrome_page.set_default_navigation_timeout(120000)
 
-                select_unionpay_store(page, up_config)
-                time.sleep(0.5)
+                    logger.info("  [导航] 前往美团外卖账单下载页...")
+                    chrome_page.goto(MEITUAN_DOWNLOAD_URL)
+                    chrome_page.wait_for_load_state("networkidle", timeout=120_000)
+                    time.sleep(3)
 
-                logger.info("  [搜索] 点击搜索...")
-                click_by_text(page, "搜索", "搜索")
-                page.wait_for_load_state("networkidle", timeout=150_000)
-                time.sleep(3)
-
-                bill_data = scrape_unionpay_bill(page)
-                save_unionpay_bill_csv(bill_data, store_short, date_label, output_dir)
-
-            logger.info(f"{'=' * 55}")
-            logger.info(f"  银豹付交易账单下载全部完成！")
-            logger.info(f"  输出目录: {output_dir}")
-            logger.info(f"{'=' * 55}\n")
-
-            # ── Part 1.6：下载会员消费汇总表 ─────────────────────────────
-            logger.info(f"{'─' * 55}")
-            logger.info(f"  下载会员消费汇总表")
-            logger.info(f"{'─' * 55}")
-
-            for i, cs_config in enumerate(CUSTOMER_SUMMARY_STORE_CONFIG):
-                store_short = cs_config["store_short"]
-                logger.info(f"{'─' * 40}")
-                logger.info(f"  门店 {i + 1}/{len(CUSTOMER_SUMMARY_STORE_CONFIG)}: {store_short}")
-                logger.info(f"{'─' * 40}")
-
-                logger.info("  [导航] 前往会员消费汇总表页面...")
-                page.goto(CUSTOMER_SUMMARY_URL)
-                page.wait_for_load_state("networkidle", timeout=120_000)
-                time.sleep(2)
-
-                select_store_type_consumption(page)
-
-                select_stores_multi(page, cs_config["select_items"])
-
-                date_dash = target_str.replace(".", "-")
-                logger.info(f"  → 设置统计时间: {date_dash}...")
-                result = page.evaluate(f"""
-                    (function() {{
-                        function setVal(id, val) {{
-                            var inp = document.getElementById(id);
-                            if (!inp) return 'not found: ' + id;
-                            if (window.jQuery && jQuery.fn.datepicker) {{
-                                jQuery(inp).datepicker('setDate', val);
+                    # 设置账单日期（起始 + 结束）
+                    logger.info(f"  → 设置账单日期: {date_label} ~ {date_label}...")
+                    date_result = chrome_page.evaluate(f"""
+                        (function() {{
+                            var inputs = document.querySelectorAll('input');
+                            var dateInputs = [];
+                            for (var i = 0; i < inputs.length; i++) {{
+                                var ph = (inputs[i].placeholder || '');
+                                if (ph.indexOf('开始') >= 0 || ph.indexOf('起始') >= 0 || ph.indexOf('start') >= 0) {{
+                                    dateInputs.push({{el: inputs[i], type: 'start', ph: ph}});
+                                }} else if (ph.indexOf('结束') >= 0 || ph.indexOf('截止') >= 0 || ph.indexOf('end') >= 0) {{
+                                    dateInputs.push({{el: inputs[i], type: 'end', ph: ph}});
+                                }} else if (ph.indexOf('日期') >= 0 || ph.indexOf('选择') >= 0) {{
+                                    dateInputs.push({{el: inputs[i], type: 'date', ph: ph}});
+                                }}
                             }}
-                            var nativeSet = Object.getOwnPropertyDescriptor(
-                                HTMLInputElement.prototype, 'value').set;
-                            nativeSet.call(inp, val);
-                            inp.dispatchEvent(new Event('input', {{bubbles: true}}));
-                            inp.dispatchEvent(new Event('change', {{bubbles: true}}));
-                            inp.dispatchEvent(new Event('blur', {{bubbles: true}}));
-                            return inp.value;
-                        }}
-                        var r1 = setVal('txt_startDatetime', '{date_dash}');
-                        var r2 = setVal('txt_endDatetime', '{date_dash}');
-                        return 'start=' + r1 + ', end=' + r2;
-                    }})()
-                """)
-                logger.info(f"  统计时间: {result}")
+                            if (dateInputs.length > 0) {{
+                                return 'found ' + dateInputs.length + ' date inputs: ' + dateInputs.map(function(d) {{ return d.type + '=' + d.ph; }}).join(', ');
+                            }}
+                            var els = document.querySelectorAll('*');
+                            for (var i = 0; i < els.length; i++) {{
+                                if (els[i].textContent.trim().indexOf('账单日期') >= 0 && els[i].children.length <= 2) {{
+                                    var parent = els[i].closest('[class*="form"], [class*="item"], [class*="row"]') || els[i].parentElement;
+                                    if (parent) {{
+                                        var inps = parent.querySelectorAll('input');
+                                        return 'found ' + inps.length + ' inputs near 账单日期';
+                                    }}
+                                }}
+                            }}
+                            return 'date input not found';
+                        }})()
+                    """)
+                    logger.info(f"  账单日期定位: {date_result}")
+                    time.sleep(1)
 
-                logger.info("  [查询] 执行查询...")
-                page.locator("#btnSearch").click()
-                page.wait_for_load_state("networkidle", timeout=150_000)
-                time.sleep(3)
+                    # 填写起始日期
+                    logger.info(f"  → 填写起始日期...")
+                    chrome_page.evaluate(f"""
+                        (function() {{
+                            var inputs = document.querySelectorAll('input');
+                            for (var i = 0; i < inputs.length; i++) {{
+                                var ph = (inputs[i].placeholder || '');
+                                if (ph.indexOf('开始') >= 0 || ph.indexOf('起始') >= 0 || ph.indexOf('start') >= 0) {{
+                                    inputs[i].focus();
+                                    inputs[i].click();
+                                    return;
+                                }}
+                            }}
+                            var els = document.querySelectorAll('*');
+                            for (var i = 0; i < els.length; i++) {{
+                                if (els[i].textContent.trim().indexOf('账单日期') >= 0 && els[i].children.length <= 2) {{
+                                    var parent = els[i].closest('[class*="form"], [class*="item"], [class*="row"]') || els[i].parentElement;
+                                    if (parent) {{
+                                        var inp = parent.querySelectorAll('input')[0];
+                                        if (inp) {{ inp.focus(); inp.click(); }}
+                                        return;
+                                    }}
+                                }}
+                            }}
+                        }})()
+                    """)
+                    time.sleep(0.5)
+                    start_input = chrome_page.locator("input:focus")
+                    if start_input.count() > 0:
+                        start_input.press("Control+a")
+                        start_input.type(date_label, delay=50)
+                        start_input.press("Enter")
+                        logger.info(f"  已输入起始日期: {date_label}")
+                    time.sleep(1)
 
-                logger.info("  [导出] 点击导出销售单据...")
-                click_by_text(page, "导出销售单据", "导出销售单据")
-                time.sleep(2)
+                    # 填写结束日期
+                    logger.info(f"  → 填写结束日期...")
+                    chrome_page.evaluate(f"""
+                        (function() {{
+                            var inputs = document.querySelectorAll('input');
+                            for (var i = 0; i < inputs.length; i++) {{
+                                var ph = (inputs[i].placeholder || '');
+                                if (ph.indexOf('结束') >= 0 || ph.indexOf('截止') >= 0 || ph.indexOf('end') >= 0) {{
+                                    inputs[i].focus();
+                                    inputs[i].click();
+                                    return;
+                                }}
+                            }}
+                            var els = document.querySelectorAll('*');
+                            for (var i = 0; i < els.length; i++) {{
+                                if (els[i].textContent.trim().indexOf('账单日期') >= 0 && els[i].children.length <= 2) {{
+                                    var parent = els[i].closest('[class*="form"], [class*="item"], [class*="row"]') || els[i].parentElement;
+                                    if (parent) {{
+                                        var inps = parent.querySelectorAll('input');
+                                        if (inps.length >= 2) {{ inps[1].focus(); inps[1].click(); }}
+                                        return;
+                                    }}
+                                }}
+                            }}
+                        }})()
+                    """)
+                    time.sleep(0.5)
+                    end_input = chrome_page.locator("input:focus")
+                    if end_input.count() > 0:
+                        end_input.press("Control+a")
+                        end_input.type(date_label, delay=50)
+                        end_input.press("Enter")
+                        logger.info(f"  已输入结束日期: {date_label}")
+                    time.sleep(1)
 
-                logger.info("  [导出] 点击弹窗中的导出...")
-                with page.expect_download(timeout=180_000) as dl_info:
-                    click_by_text(page, "导出", "弹窗导出")
+                    # 选择明细类型: 订单明细
+                    logger.info("  → 选择明细类型: 订单明细...")
+                    type_result = chrome_page.evaluate("""
+                        (function() {
+                            var selects = document.querySelectorAll('select');
+                            for (var i = 0; i < selects.length; i++) {
+                                var opts = selects[i].querySelectorAll('option');
+                                for (var j = 0; j < opts.length; j++) {
+                                    if (opts[j].textContent.trim() === '订单明细') {
+                                        selects[i].value = opts[j].value;
+                                        selects[i].dispatchEvent(new Event('change', {bubbles: true}));
+                                        return 'selected via native select';
+                                    }
+                                }
+                            }
+                            var els = document.querySelectorAll('*');
+                            for (var i = 0; i < els.length; i++) {
+                                var text = els[i].textContent.trim();
+                                if (text.indexOf('明细类型') >= 0 && els[i].children.length <= 2) {
+                                    var parent = els[i].closest('[class*="form"], [class*="item"], [class*="row"]') || els[i].parentElement;
+                                    if (parent) {
+                                        var sel = parent.querySelector('[class*="select"], [class*="dropdown"], select, [role="combobox"]');
+                                        if (sel) {
+                                            sel.click();
+                                            return 'opened dropdown near 明细类型';
+                                        }
+                                    }
+                                }
+                            }
+                            return 'dropdown trigger not found';
+                        })()
+                    """)
+                    logger.info(f"  明细类型: {type_result}")
+                    time.sleep(1)
 
-                download = dl_info.value
-                logger.info(f"  下载文件名: {download.suggested_filename}")
+                    option_result = chrome_page.evaluate("""
+                        (function() {
+                            var els = document.querySelectorAll('li, div[class*="option"], span[class*="option"], div[role="option"]');
+                            for (var i = 0; i < els.length; i++) {
+                                if (els[i].textContent.trim() === '订单明细' && els[i].offsetParent !== null) {
+                                    els[i].click();
+                                    return 'clicked 订单明细';
+                                }
+                            }
+                            var all = document.querySelectorAll('*');
+                            for (var i = 0; i < all.length; i++) {
+                                if (all[i].textContent.trim() === '订单明细' && all[i].children.length === 0 && all[i].offsetParent !== null) {
+                                    all[i].click();
+                                    return 'clicked 订单明细 (fallback)';
+                                }
+                            }
+                            return '订单明细 not found';
+                        })()
+                    """)
+                    logger.info(f"  选择订单明细: {option_result}")
+                    time.sleep(1)
 
-                dest = output_dir / f"会员消费汇总表_{store_short}_{date_label}.xlsx"
-                download.save_as(dest)
-                logger.info(f"  已保存到: {dest}")
+                    # 点击下载账单
+                    logger.info("  → 点击下载账单...")
+                    click_by_text(chrome_page, "下载账单", "下载账单")
+                    time.sleep(2)
+
+                    # 点击刷新
+                    logger.info("  → 点击刷新...")
+                    click_by_text(chrome_page, "刷新", "刷新")
+                    time.sleep(2)
+
+                    # 点击表格中第一个下载按钮并保存文件
+                    logger.info("  → 点击表格中第一个下载按钮...")
+                    with chrome_page.expect_download(timeout=60_000) as dl_info:
+                        dl_result = chrome_page.evaluate("""
+                            (function() {
+                                var table = document.querySelector('table, [class*="table"], [class*="list"]');
+                                if (table) {
+                                    var els = table.querySelectorAll('a, button, span');
+                                    for (var i = 0; i < els.length; i++) {
+                                        if (els[i].textContent.trim() === '下载') {
+                                            els[i].click();
+                                            return 'clicked first 下载 in table';
+                                        }
+                                    }
+                                }
+                                var all = document.querySelectorAll('a, button, span');
+                                for (var i = 0; i < all.length; i++) {
+                                    var t = all[i].textContent.trim();
+                                    if (t === '下载' && all[i].offsetParent !== null) {
+                                        all[i].click();
+                                        return 'clicked first visible 下载';
+                                    }
+                                }
+                                return 'download button not found';
+                            })()
+                        """)
+                        logger.info(f"  表格下载: {dl_result}")
+
+                    download = dl_info.value
+                    logger.info(f"  下载原始文件名: {download.suggested_filename}")
+                    dest = output_dir / f"订单明细_{mt_store_short}_{date_label}.xlsx"
+                    download.save_as(dest)
+                    logger.info(f"  已保存到: {dest}")
+
+                except Exception as e:
+                    logger.error(f"美团外卖订单明细下载失败 ({mt_store_short}): {e}")
+                    if chrome_page:
+                        try:
+                            screenshot = OUTPUT_DIR / f"meituan_error_{mt_store_short}.png"
+                            chrome_page.screenshot(path=str(screenshot))
+                            logger.info(f"  错误截图已保存: {screenshot}")
+                        except Exception:
+                            pass
+                finally:
+                    if chrome_page:
+                        try:
+                            chrome_page.close()
+                        except Exception:
+                            pass
+                    if chrome_browser:
+                        try:
+                            chrome_browser.close()
+                        except Exception:
+                            pass
+                    try:
+                        chrome_process.terminate()
+                    except Exception:
+                        pass
 
             logger.info(f"{'=' * 55}")
-            logger.info(f"  会员消费汇总表下载全部完成！")
-            logger.info(f"  输出目录: {output_dir}")
-            logger.info(f"{'=' * 55}\n")
-
-            # ── Part 2：格式化数据并写入月度统计表 ──────────────────────────
-            logger.info(f"{'─' * 55}")
-            logger.info(f"  Part 2：格式化数据并写入月度统计表")
-            logger.info(f"{'─' * 55}")
-
-            for i, store in enumerate(STORES):
-                logger.info(f"{'─' * 40}")
-                logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['template_name']}")
-                logger.info(f"{'─' * 40}")
-
-                monthly_file, created = create_or_open_monthly_file(
-                    store, target, TEMPLATE_FILE, OUTPUT_DIR
-                )
-                fill_daily_data(monthly_file, target, store, output_dir)
-
-            logger.info(f"{'=' * 55}")
-            logger.info(f"  麦安研营业统计格式化全部完成！")
+            logger.info(f"  美团外卖订单明细下载全部完成！")
             logger.info(f"{'=' * 55}\n")
 
         except Exception as e:
