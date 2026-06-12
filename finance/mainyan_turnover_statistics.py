@@ -1003,6 +1003,7 @@ def main():
                 logger.info(f"  启动 Chrome (port={mt_port}, profile={mt_user_data_dir})...")
                 chrome_process = subprocess.Popen([
                     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                    "--headless",
                     f"--remote-debugging-port={mt_port}",
                     f"--user-data-dir={mt_user_data_dir}",
                 ])
