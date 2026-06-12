@@ -1206,6 +1206,7 @@ def main():
             logger.info(f"  启动 Chrome (port=9226, profile=C:\\ChromeDebug_MTJYB)...")
             jyb_chrome_process = subprocess.Popen([
                 r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                #         "--headless=new",
                 "--remote-debugging-port=9226",
                 r"--user-data-dir=C:\ChromeDebug_MTJYB",
             ])
@@ -1226,55 +1227,109 @@ def main():
                 jyb_page.wait_for_load_state("networkidle", timeout=120_000)
                 time.sleep(3)
 
+                # ── 设置收益时间 ──────────────────────────────
                 days_diff = (datetime.now().date() - target.date()).days
-                date_slash = target.strftime("%Y/%m/%d")
-                logger.info(f"  → 设置收益时间: {date_slash} (距今 {days_diff} 天)...")
+                logger.info(f"  → 设置收益时间: {target.strftime('%Y/%m/%d')} (距今 {days_diff} 天)...")
 
-                if days_diff == 0:
-                    jyb_page.locator('button[value="今日"]').click()
-                elif days_diff == 1:
-                    jyb_page.locator('button[value="昨日"]').click()
-                elif days_diff == 2:
-                    jyb_page.locator('button[value="前日"]').click()
+                if days_diff in (0, 1, 2):
+                    btn_map = {0: "今日", 1: "昨日", 2: "前日"}
+                    jyb_page.locator(f'button[value="{btn_map[days_diff]}"]').click()
+                    logger.info(f"  已点击快捷按钮: {btn_map[days_diff]}")
                 else:
-                    jyb_page.locator('.mtd-date-picker input').click()
-                    time.sleep(1)
-                    set_result = jyb_page.evaluate(f"""
-                        (function() {{
-                            var panels = document.querySelectorAll(
-                                '[class*="picker"] [class*="panel"], .mtd-popper, .mtd-picker-dropdown');
-                            for (var p = 0; p < panels.length; p++) {{
-                                var inputs = panels[p].querySelectorAll('input:not([readonly])');
-                                if (inputs.length >= 2) {{
-                                    var nativeSet = Object.getOwnPropertyDescriptor(
-                                        HTMLInputElement.prototype, 'value').set;
-                                    nativeSet.call(inputs[0], '{date_slash}');
-                                    inputs[0].dispatchEvent(new Event('input', {{bubbles: true}}));
-                                    inputs[0].dispatchEvent(new Event('change', {{bubbles: true}}));
-                                    nativeSet.call(inputs[1], '{date_slash}');
-                                    inputs[1].dispatchEvent(new Event('input', {{bubbles: true}}));
-                                    inputs[1].dispatchEvent(new Event('change', {{bubbles: true}}));
-                                    inputs[1].dispatchEvent(new KeyboardEvent('keydown',
-                                        {{key: 'Enter', keyCode: 13, bubbles: true}}));
-                                    return 'set via panel inputs';
-                                }}
-                            }}
-                            var input = document.querySelector('.mtd-date-picker input');
-                            input.removeAttribute('readonly');
-                            var nativeSet = Object.getOwnPropertyDescriptor(
-                                HTMLInputElement.prototype, 'value').set;
-                            nativeSet.call(input, '{date_slash} - {date_slash}');
-                            input.dispatchEvent(new Event('input', {{bubbles: true}}));
-                            input.dispatchEvent(new Event('change', {{bubbles: true}}));
-                            input.dispatchEvent(new Event('blur', {{bubbles: true}}));
-                            return 'set via input fallback';
-                        }})()
-                    """)
-                    logger.info(f"  日期设置: {set_result}")
+                    try:
+                        jyb_page.locator('.mtd-date-picker input').click()
+                        time.sleep(1)
+
+                        # 读取左侧日历当前显示的年月
+                        current_info = jyb_page.evaluate("""
+                            (function() {
+                                var popup = document.querySelector('.mtd-singleRangePicker-pop');
+                                if (!popup) return null;
+                                var leftCal = popup.querySelector('.mtd-date-calendar');
+                                if (!leftCal) return null;
+                                var yearBtn = leftCal.querySelector('.mtd-date-calendar-year-btn');
+                                var monthBtn = leftCal.querySelector('.mtd-date-calendar-month-btn');
+                                if (!yearBtn || !monthBtn) return null;
+                                return { year: parseInt(yearBtn.textContent), month: parseInt(monthBtn.textContent) };
+                            })()
+                        """)
+
+                        if not current_info:
+                            logger.warning("  日历面板未打开或无法读取年月")
+                        else:
+                            logger.info(f"  当前日历: {current_info['year']}年{current_info['month']}月")
+                            months_back = (current_info['year'] - target.year) * 12 + (current_info['month'] - target.month)
+
+                            if months_back > 0:
+                                logger.info(f"  往前导航 {months_back} 个月...")
+                                for _ in range(months_back):
+                                    jyb_page.locator(
+                                        '.mtd-singleRangePicker-pop .mtd-date-calendar:first-child '
+                                        '.mtd-date-calendar-month-switcher.left-switcher'
+                                    ).click()
+                                    time.sleep(0.3)
+                                time.sleep(0.5)
+
+                            target_day_str = str(target.day)
+
+                            # 点击目标日（起始日期）
+                            start_result = jyb_page.evaluate(f"""
+                                (function() {{
+                                    var popup = document.querySelector('.mtd-singleRangePicker-pop');
+                                    if (!popup) return 'popup not found';
+                                    var leftCal = popup.querySelector('.mtd-date-calendar');
+                                    var activePanel = leftCal.querySelector('.mtd-date-calendar-content.active');
+                                    if (!activePanel) return 'no active panel';
+                                    var wrappers = activePanel.querySelectorAll('.mtd-date-panel-data-wrapper');
+                                    for (var j = 0; j < wrappers.length; j++) {{
+                                        if (wrappers[j].classList.contains('not-current-month')) continue;
+                                        if (wrappers[j].classList.contains('disabled-date')) continue;
+                                        var btn = wrappers[j].querySelector('.mtd-date-panel-data');
+                                        if (btn && btn.textContent.trim() === '{target_day_str}') {{
+                                            btn.click();
+                                            return 'clicked start: day ' + btn.textContent.trim();
+                                        }}
+                                    }}
+                                    return 'start day {target_day_str} not found';
+                                }})()
+                            """)
+                            logger.info(f"  {start_result}")
+                            time.sleep(0.5)
+
+                            # 再次点击同一天（结束日期 = 起始日期）
+                            end_result = jyb_page.evaluate(f"""
+                                (function() {{
+                                    var popup = document.querySelector('.mtd-singleRangePicker-pop');
+                                    if (!popup) return 'popup closed';
+                                    var leftCal = popup.querySelector('.mtd-date-calendar');
+                                    var activePanel = leftCal.querySelector('.mtd-date-calendar-content.active');
+                                    if (!activePanel) return 'no active panel';
+                                    var wrappers = activePanel.querySelectorAll('.mtd-date-panel-data-wrapper');
+                                    for (var j = 0; j < wrappers.length; j++) {{
+                                        if (wrappers[j].classList.contains('not-current-month')) continue;
+                                        var btn = wrappers[j].querySelector('.mtd-date-panel-data');
+                                        if (btn && btn.textContent.trim() === '{target_day_str}') {{
+                                            btn.click();
+                                            return 'clicked end: day ' + btn.textContent.trim();
+                                        }}
+                                    }}
+                                    return 'end day {target_day_str} not found';
+                                }})()
+                            """)
+                            logger.info(f"  {end_result}")
+
+                    except Exception as date_err:
+                        logger.warning(f"  日期选择器操作失败: {date_err}")
+                        try:
+                            jyb_page.screenshot(path=str(OUTPUT_DIR / "debug_datepicker.png"))
+                            logger.info(f"  已保存调试截图: {OUTPUT_DIR / 'debug_datepicker.png'}")
+                        except Exception:
+                            pass
 
                 logger.info("  等待数据刷新...")
                 time.sleep(3)
 
+                # ── 抓取所有门店数据（保持「3家门店」全选） ──────────────────
                 logger.info("  → 抓取经营宝收益数据...")
                 jyb_rows = jyb_page.evaluate("""
                     (function() {
