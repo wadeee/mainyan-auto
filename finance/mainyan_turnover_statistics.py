@@ -54,7 +54,7 @@ LOGIN_URL = "https://beta69.pospal.cn/"
 BUSINESS_SUMMARY_URL = "https://beta69.pospal.cn/Report/BusinessSummaryV2"
 UNIONPAY_BILL_URL = "https://cloudapp-pay69.pospal.cn/#/additional/fund-summary?oem=0"
 CUSTOMER_SUMMARY_URL = "https://beta69.pospal.cn/CustomerReport/CustomerConsumerSummary"
-MEITUAN_DOWNLOAD_URL = "https://waimaieapp.meituan.com/finance/pc/download"
+MEITUAN_DOWNLOAD_URL = "https://waimaieapp.meituan.com/finance/static/gray_html_pc/billReconciliation.html#/daily-bill"
 
 MEITUAN_STORE_CONFIG = [
     {
@@ -1013,216 +1013,62 @@ def main():
                     chrome_page.set_default_timeout(120000)
                     chrome_page.set_default_navigation_timeout(120000)
 
-                    logger.info("  [导航] 前往美团外卖账单下载页...")
+                    logger.info("  [导航] 前往美团外卖账单明细页...")
                     chrome_page.goto(MEITUAN_DOWNLOAD_URL)
                     chrome_page.wait_for_load_state("networkidle", timeout=120_000)
                     time.sleep(3)
 
-                    # 设置账单日期（起始 + 结束）
-                    logger.info(f"  → 设置账单日期: {date_label} ~ {date_label}...")
-                    date_result = chrome_page.evaluate(f"""
-                        (function() {{
-                            var inputs = document.querySelectorAll('input');
-                            var dateInputs = [];
-                            for (var i = 0; i < inputs.length; i++) {{
-                                var ph = (inputs[i].placeholder || '');
-                                if (ph.indexOf('开始') >= 0 || ph.indexOf('起始') >= 0 || ph.indexOf('start') >= 0) {{
-                                    dateInputs.push({{el: inputs[i], type: 'start', ph: ph}});
-                                }} else if (ph.indexOf('结束') >= 0 || ph.indexOf('截止') >= 0 || ph.indexOf('end') >= 0) {{
-                                    dateInputs.push({{el: inputs[i], type: 'end', ph: ph}});
-                                }} else if (ph.indexOf('日期') >= 0 || ph.indexOf('选择') >= 0) {{
-                                    dateInputs.push({{el: inputs[i], type: 'date', ph: ph}});
-                                }}
-                            }}
-                            if (dateInputs.length > 0) {{
-                                return 'found ' + dateInputs.length + ' date inputs: ' + dateInputs.map(function(d) {{ return d.type + '=' + d.ph; }}).join(', ');
-                            }}
-                            var els = document.querySelectorAll('*');
-                            for (var i = 0; i < els.length; i++) {{
-                                if (els[i].textContent.trim().indexOf('账单日期') >= 0 && els[i].children.length <= 2) {{
-                                    var parent = els[i].closest('[class*="form"], [class*="item"], [class*="row"]') || els[i].parentElement;
-                                    if (parent) {{
-                                        var inps = parent.querySelectorAll('input');
-                                        return 'found ' + inps.length + ' inputs near 账单日期';
-                                    }}
-                                }}
-                            }}
-                            return 'date input not found';
-                        }})()
-                    """)
-                    logger.info(f"  账单日期定位: {date_result}")
-                    time.sleep(1)
-
-                    # 填写起始日期
-                    logger.info(f"  → 填写起始日期...")
-                    chrome_page.evaluate(f"""
-                        (function() {{
-                            var inputs = document.querySelectorAll('input');
-                            for (var i = 0; i < inputs.length; i++) {{
-                                var ph = (inputs[i].placeholder || '');
-                                if (ph.indexOf('开始') >= 0 || ph.indexOf('起始') >= 0 || ph.indexOf('start') >= 0) {{
-                                    inputs[i].focus();
-                                    inputs[i].click();
-                                    return;
-                                }}
-                            }}
-                            var els = document.querySelectorAll('*');
-                            for (var i = 0; i < els.length; i++) {{
-                                if (els[i].textContent.trim().indexOf('账单日期') >= 0 && els[i].children.length <= 2) {{
-                                    var parent = els[i].closest('[class*="form"], [class*="item"], [class*="row"]') || els[i].parentElement;
-                                    if (parent) {{
-                                        var inp = parent.querySelectorAll('input')[0];
-                                        if (inp) {{ inp.focus(); inp.click(); }}
-                                        return;
-                                    }}
-                                }}
-                            }}
-                        }})()
-                    """)
+                    # 设置日期
+                    logger.info(f"  → 设置日期: {date_label}...")
+                    date_input = chrome_page.locator(".select-input-wrapper .roo-input")
+                    date_input.click()
                     time.sleep(0.5)
-                    start_input = chrome_page.locator("input:focus")
-                    if start_input.count() > 0:
-                        start_input.press("Control+a")
-                        start_input.type(date_label, delay=50)
-                        start_input.press("Enter")
-                        logger.info(f"  已输入起始日期: {date_label}")
-                    time.sleep(1)
+                    date_input.press("Control+a")
+                    date_input.type(date_label, delay=50)
+                    date_input.press("Enter")
+                    logger.info(f"  已设置日期: {date_label}")
 
-                    # 填写结束日期
-                    logger.info(f"  → 填写结束日期...")
-                    chrome_page.evaluate(f"""
-                        (function() {{
-                            var inputs = document.querySelectorAll('input');
-                            for (var i = 0; i < inputs.length; i++) {{
-                                var ph = (inputs[i].placeholder || '');
-                                if (ph.indexOf('结束') >= 0 || ph.indexOf('截止') >= 0 || ph.indexOf('end') >= 0) {{
-                                    inputs[i].focus();
-                                    inputs[i].click();
-                                    return;
-                                }}
-                            }}
-                            var els = document.querySelectorAll('*');
-                            for (var i = 0; i < els.length; i++) {{
-                                if (els[i].textContent.trim().indexOf('账单日期') >= 0 && els[i].children.length <= 2) {{
-                                    var parent = els[i].closest('[class*="form"], [class*="item"], [class*="row"]') || els[i].parentElement;
-                                    if (parent) {{
-                                        var inps = parent.querySelectorAll('input');
-                                        if (inps.length >= 2) {{ inps[1].focus(); inps[1].click(); }}
-                                        return;
-                                    }}
-                                }}
-                            }}
-                        }})()
-                    """)
-                    time.sleep(0.5)
-                    end_input = chrome_page.locator("input:focus")
-                    if end_input.count() > 0:
-                        end_input.press("Control+a")
-                        end_input.type(date_label, delay=50)
-                        end_input.press("Enter")
-                        logger.info(f"  已输入结束日期: {date_label}")
-                    time.sleep(1)
+                    # 等待数据刷新
+                    logger.info("  等待数据刷新...")
+                    time.sleep(3)
 
-                    # 选择明细类型: 订单明细
-                    logger.info("  → 选择明细类型: 订单明细...")
-                    type_result = chrome_page.evaluate("""
+                    # 从 tfoot 总计行抓取数据
+                    logger.info("  → 抓取账单数据...")
+                    bill_data = chrome_page.evaluate("""
                         (function() {
-                            var selects = document.querySelectorAll('select');
-                            for (var i = 0; i < selects.length; i++) {
-                                var opts = selects[i].querySelectorAll('option');
-                                for (var j = 0; j < opts.length; j++) {
-                                    if (opts[j].textContent.trim() === '订单明细') {
-                                        selects[i].value = opts[j].value;
-                                        selects[i].dispatchEvent(new Event('change', {bubbles: true}));
-                                        return 'selected via native select';
-                                    }
+                            var result = {};
+                            var tfoot = document.querySelector('.bill-charge-table tfoot tr');
+                            if (tfoot) {
+                                var tds = tfoot.querySelectorAll('td');
+                                result['商品总价'] = parseFloat(tds[1].textContent.trim()) || 0;
+                                result['打包费'] = parseFloat(tds[2].textContent.trim()) || 0;
+                                result['商家对顾客的活动补贴'] = parseFloat(tds[3].textContent.trim()) || 0;
+                                result['佣金'] = parseFloat(tds[6].textContent.trim()) || 0;
+                                result['配送服务费'] = parseFloat(tds[7].textContent.trim()) || 0;
+                            }
+                            var tabs = document.querySelectorAll('.roo-tabs-nav .tab-item a');
+                            for (var i = 0; i < tabs.length; i++) {
+                                var text = tabs[i].textContent.trim();
+                                if (text.indexOf('其它类') >= 0 || text.indexOf('其他类') >= 0) {
+                                    var match = text.match(/([-\\d.]+)\\s*$/);
+                                    result['其他类'] = match ? parseFloat(match[1]) : 0;
+                                    break;
                                 }
                             }
-                            var els = document.querySelectorAll('*');
-                            for (var i = 0; i < els.length; i++) {
-                                var text = els[i].textContent.trim();
-                                if (text.indexOf('明细类型') >= 0 && els[i].children.length <= 2) {
-                                    var parent = els[i].closest('[class*="form"], [class*="item"], [class*="row"]') || els[i].parentElement;
-                                    if (parent) {
-                                        var sel = parent.querySelector('[class*="select"], [class*="dropdown"], select, [role="combobox"]');
-                                        if (sel) {
-                                            sel.click();
-                                            return 'opened dropdown near 明细类型';
-                                        }
-                                    }
-                                }
-                            }
-                            return 'dropdown trigger not found';
+                            return result;
                         })()
                     """)
-                    logger.info(f"  明细类型: {type_result}")
-                    time.sleep(1)
+                    logger.info(f"  抓取数据: {json.dumps(bill_data, ensure_ascii=False)}")
 
-                    option_result = chrome_page.evaluate("""
-                        (function() {
-                            var els = document.querySelectorAll('li, div[class*="option"], span[class*="option"], div[role="option"]');
-                            for (var i = 0; i < els.length; i++) {
-                                if (els[i].textContent.trim() === '订单明细' && els[i].offsetParent !== null) {
-                                    els[i].click();
-                                    return 'clicked 订单明细';
-                                }
-                            }
-                            var all = document.querySelectorAll('*');
-                            for (var i = 0; i < all.length; i++) {
-                                if (all[i].textContent.trim() === '订单明细' && all[i].children.length === 0 && all[i].offsetParent !== null) {
-                                    all[i].click();
-                                    return 'clicked 订单明细 (fallback)';
-                                }
-                            }
-                            return '订单明细 not found';
-                        })()
-                    """)
-                    logger.info(f"  选择订单明细: {option_result}")
-                    time.sleep(1)
-
-                    # 点击下载账单
-                    logger.info("  → 点击下载账单...")
-                    click_by_text(chrome_page, "下载账单", "下载账单")
-                    time.sleep(2)
-
-                    # 点击刷新
-                    logger.info("  → 点击刷新...")
-                    click_by_text(chrome_page, "刷新", "刷新")
-                    time.sleep(2)
-
-                    # 点击表格中第一个下载按钮并保存文件
-                    logger.info("  → 点击表格中第一个下载按钮...")
-                    with chrome_page.expect_download(timeout=60_000) as dl_info:
-                        dl_result = chrome_page.evaluate("""
-                            (function() {
-                                var table = document.querySelector('table, [class*="table"], [class*="list"]');
-                                if (table) {
-                                    var els = table.querySelectorAll('a, button, span');
-                                    for (var i = 0; i < els.length; i++) {
-                                        if (els[i].textContent.trim() === '下载') {
-                                            els[i].click();
-                                            return 'clicked first 下载 in table';
-                                        }
-                                    }
-                                }
-                                var all = document.querySelectorAll('a, button, span');
-                                for (var i = 0; i < all.length; i++) {
-                                    var t = all[i].textContent.trim();
-                                    if (t === '下载' && all[i].offsetParent !== null) {
-                                        all[i].click();
-                                        return 'clicked first visible 下载';
-                                    }
-                                }
-                                return 'download button not found';
-                            })()
-                        """)
-                        logger.info(f"  表格下载: {dl_result}")
-
-                    download = dl_info.value
-                    logger.info(f"  下载原始文件名: {download.suggested_filename}")
-                    dest = output_dir / f"订单明细_{mt_store_short}_{date_label}.xlsx"
-                    download.save_as(dest)
-                    logger.info(f"  已保存到: {dest}")
+                    # 保存为 CSV
+                    meituan_csv_fields = ["商品总价", "打包费", "商家对顾客的活动补贴", "佣金", "配送服务费", "其他类"]
+                    csv_file = output_dir / f"订单明细_{mt_store_short}_{date_label}.csv"
+                    with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(["项目", "金额"])
+                        for key in meituan_csv_fields:
+                            writer.writerow([key, bill_data.get(key, 0)])
+                    logger.info(f"  已保存CSV: {csv_file}")
 
                 except Exception as e:
                     logger.error(f"美团外卖订单明细下载失败 ({mt_store_short}): {e}")
