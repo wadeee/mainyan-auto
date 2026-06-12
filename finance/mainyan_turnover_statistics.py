@@ -56,6 +56,7 @@ UNIONPAY_BILL_URL = "https://cloudapp-pay69.pospal.cn/#/additional/fund-summary?
 CUSTOMER_SUMMARY_URL = "https://beta69.pospal.cn/CustomerReport/CustomerConsumerSummary"
 MEITUAN_DOWNLOAD_URL = "https://waimaieapp.meituan.com/finance/static/gray_html_pc/billReconciliation.html#/daily-bill"
 MEITUAN_AD_URL = "https://waimaieapp.meituan.com/ad/v1/pc#/account"
+MEITUAN_JYB_URL = "https://ecom.meituan.com/finance-kdb/profit/home"
 
 MEITUAN_STORE_CONFIG = [
     {
@@ -297,6 +298,15 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
         ad_promo = read_unionpay_bill_csv(ad_promo_file)
         logger.info(f"  读取美团推广 变化金额 = {ad_promo.get('变化金额')}")
 
+    jyb_file = daily_download_dir / f"美团经营宝_每日收益_{store['short']}_{date_label}.csv"
+    if not jyb_file.exists():
+        logger.warning(f"  美团经营宝收益不存在，跳过填写: {jyb_file.name}")
+        jyb = None
+    else:
+        jyb = read_unionpay_bill_csv(jyb_file)
+        logger.info(f"  读取经营宝 售价={jyb.get('售价')}, 促销费={jyb.get('促销费')}, "
+                    f"服务费={jyb.get('服务费')}, 其他费用={jyb.get('其他费用')}")
+
     wb = _lwb(monthly_file)
     ws1 = wb.worksheets[0]
 
@@ -342,6 +352,16 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
     if ad_promo:
         if ad_promo.get("变化金额") is not None:
             ws1.cell(row=row_s1, column=30).value = abs(ad_promo["变化金额"])
+
+    if jyb:
+        if jyb.get("售价") is not None:
+            ws1.cell(row=row_s1, column=39).value = jyb["售价"]
+        if jyb.get("促销费") is not None:
+            ws1.cell(row=row_s1, column=40).value = jyb["促销费"]
+        if jyb.get("服务费") is not None:
+            ws1.cell(row=row_s1, column=41).value = jyb["服务费"]
+        if jyb.get("其他费用") is not None:
+            ws1.cell(row=row_s1, column=42).value = jyb["其他费用"]
 
     wb.save(monthly_file)
     wb.close()
@@ -1176,6 +1196,165 @@ def main():
 
             logger.info(f"{'=' * 55}")
             logger.info(f"  美团外卖账单明细下载全部完成！")
+            logger.info(f"{'=' * 55}\n")
+
+            # ── Part 3.5：美团经营宝每日收益 ─────────────────────────────
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  Part 3.5：下载美团经营宝每日收益")
+            logger.info(f"{'─' * 55}")
+
+            logger.info(f"  启动 Chrome (port=9226, profile=C:\\ChromeDebug_MTJYB)...")
+            jyb_chrome_process = subprocess.Popen([
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                "--remote-debugging-port=9226",
+                r"--user-data-dir=C:\ChromeDebug_MTJYB",
+            ])
+            time.sleep(5)
+
+            jyb_browser = None
+            jyb_page = None
+            try:
+                logger.info("  连接到 Chrome...")
+                jyb_browser = pw.chromium.connect_over_cdp("http://localhost:9226")
+                jyb_context = jyb_browser.contexts[0]
+                jyb_page = jyb_context.new_page()
+                jyb_page.set_default_timeout(120000)
+                jyb_page.set_default_navigation_timeout(120000)
+
+                logger.info("  [导航] 前往美团经营宝每日收益页...")
+                jyb_page.goto(MEITUAN_JYB_URL)
+                jyb_page.wait_for_load_state("networkidle", timeout=120_000)
+                time.sleep(3)
+
+                days_diff = (datetime.now().date() - target.date()).days
+                date_slash = target.strftime("%Y/%m/%d")
+                logger.info(f"  → 设置收益时间: {date_slash} (距今 {days_diff} 天)...")
+
+                if days_diff == 0:
+                    jyb_page.locator('button[value="今日"]').click()
+                elif days_diff == 1:
+                    jyb_page.locator('button[value="昨日"]').click()
+                elif days_diff == 2:
+                    jyb_page.locator('button[value="前日"]').click()
+                else:
+                    jyb_page.locator('.mtd-date-picker input').click()
+                    time.sleep(1)
+                    set_result = jyb_page.evaluate(f"""
+                        (function() {{
+                            var panels = document.querySelectorAll(
+                                '[class*="picker"] [class*="panel"], .mtd-popper, .mtd-picker-dropdown');
+                            for (var p = 0; p < panels.length; p++) {{
+                                var inputs = panels[p].querySelectorAll('input:not([readonly])');
+                                if (inputs.length >= 2) {{
+                                    var nativeSet = Object.getOwnPropertyDescriptor(
+                                        HTMLInputElement.prototype, 'value').set;
+                                    nativeSet.call(inputs[0], '{date_slash}');
+                                    inputs[0].dispatchEvent(new Event('input', {{bubbles: true}}));
+                                    inputs[0].dispatchEvent(new Event('change', {{bubbles: true}}));
+                                    nativeSet.call(inputs[1], '{date_slash}');
+                                    inputs[1].dispatchEvent(new Event('input', {{bubbles: true}}));
+                                    inputs[1].dispatchEvent(new Event('change', {{bubbles: true}}));
+                                    inputs[1].dispatchEvent(new KeyboardEvent('keydown',
+                                        {{key: 'Enter', keyCode: 13, bubbles: true}}));
+                                    return 'set via panel inputs';
+                                }}
+                            }}
+                            var input = document.querySelector('.mtd-date-picker input');
+                            input.removeAttribute('readonly');
+                            var nativeSet = Object.getOwnPropertyDescriptor(
+                                HTMLInputElement.prototype, 'value').set;
+                            nativeSet.call(input, '{date_slash} - {date_slash}');
+                            input.dispatchEvent(new Event('input', {{bubbles: true}}));
+                            input.dispatchEvent(new Event('change', {{bubbles: true}}));
+                            input.dispatchEvent(new Event('blur', {{bubbles: true}}));
+                            return 'set via input fallback';
+                        }})()
+                    """)
+                    logger.info(f"  日期设置: {set_result}")
+
+                logger.info("  等待数据刷新...")
+                time.sleep(3)
+
+                logger.info("  → 抓取经营宝收益数据...")
+                jyb_rows = jyb_page.evaluate("""
+                    (function() {
+                        var rows = document.querySelectorAll('.mtd-table-body tbody tr');
+                        var result = [];
+                        for (var i = 0; i < rows.length; i++) {
+                            var tds = rows[i].querySelectorAll('td');
+                            if (tds.length < 9) continue;
+                            var storeName = tds[0].textContent.trim();
+                            var priceDiv = tds[2].querySelector('div > div');
+                            var price = priceDiv
+                                ? parseFloat(priceDiv.textContent.trim().replace(/,/g, '')) || 0
+                                : parseFloat(tds[2].textContent.trim().replace(/,/g, '')) || 0;
+                            var promotion = parseFloat(tds[3].textContent.trim().replace(/,/g, '')) || 0;
+                            var service = parseFloat(tds[4].textContent.trim().replace(/,/g, '')) || 0;
+                            var other = parseFloat(tds[8].textContent.trim().replace(/,/g, '')) || 0;
+                            result.push({
+                                storeName: storeName,
+                                price: price,
+                                promotion: promotion,
+                                service: service,
+                                other: other
+                            });
+                        }
+                        return result;
+                    })()
+                """)
+                logger.info(f"  抓取到 {len(jyb_rows)} 行数据")
+
+                store_keywords = {"宝泰": "宝泰店", "龙江": "龙江店", "杏坛": "杏坛店"}
+                for row in jyb_rows:
+                    store_short = None
+                    for keyword, short in store_keywords.items():
+                        if keyword in row["storeName"]:
+                            store_short = short
+                            break
+                    if not store_short:
+                        logger.warning(f"  未匹配门店: {row['storeName']}")
+                        continue
+
+                    logger.info(f"  {store_short}: 售价={row['price']}, 促销费={row['promotion']}, "
+                                f"服务费={row['service']}, 其他费用={row['other']}")
+
+                    jyb_csv = output_dir / f"美团经营宝_每日收益_{store_short}_{date_label}.csv"
+                    with open(jyb_csv, "w", newline="", encoding="utf-8-sig") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(["项目", "金额"])
+                        writer.writerow(["售价", row["price"]])
+                        writer.writerow(["促销费", row["promotion"]])
+                        writer.writerow(["服务费", row["service"]])
+                        writer.writerow(["其他费用", row["other"]])
+                    logger.info(f"  已保存CSV: {jyb_csv}")
+
+            except Exception as e:
+                logger.error(f"美团经营宝每日收益下载失败: {e}")
+                if jyb_page:
+                    try:
+                        screenshot = OUTPUT_DIR / "meituan_jyb_error.png"
+                        jyb_page.screenshot(path=str(screenshot))
+                        logger.info(f"  错误截图已保存: {screenshot}")
+                    except Exception:
+                        pass
+            finally:
+                if jyb_page:
+                    try:
+                        jyb_page.close()
+                    except Exception:
+                        pass
+                if jyb_browser:
+                    try:
+                        jyb_browser.close()
+                    except Exception:
+                        pass
+                try:
+                    jyb_chrome_process.terminate()
+                except Exception:
+                    pass
+
+            logger.info(f"{'=' * 55}")
+            logger.info(f"  美团经营宝每日收益下载完成！")
             logger.info(f"{'=' * 55}\n")
 
             # ── Part 4：格式化数据并写入月度统计表 ──────────────────────────
