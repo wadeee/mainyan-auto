@@ -55,6 +55,7 @@ BUSINESS_SUMMARY_URL = "https://beta69.pospal.cn/Report/BusinessSummaryV2"
 UNIONPAY_BILL_URL = "https://cloudapp-pay69.pospal.cn/#/additional/fund-summary?oem=0"
 CUSTOMER_SUMMARY_URL = "https://beta69.pospal.cn/CustomerReport/CustomerConsumerSummary"
 MEITUAN_DOWNLOAD_URL = "https://waimaieapp.meituan.com/finance/static/gray_html_pc/billReconciliation.html#/daily-bill"
+MEITUAN_AD_URL = "https://waimaieapp.meituan.com/ad/v1/pc#/account"
 
 MEITUAN_STORE_CONFIG = [
     {
@@ -288,6 +289,14 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
         logger.info(f"  读取美团 打包费 = {meituan.get('打包费')}")
         logger.info(f"  读取美团 其他类 = {meituan.get('其他类')}")
 
+    ad_promo_file = daily_download_dir / f"美团外卖推广消费_{store['short']}_{date_label}.csv"
+    if not ad_promo_file.exists():
+        logger.warning(f"  美团推广消费不存在，跳过填写: {ad_promo_file.name}")
+        ad_promo = None
+    else:
+        ad_promo = read_unionpay_bill_csv(ad_promo_file)
+        logger.info(f"  读取美团推广 变化金额 = {ad_promo.get('变化金额')}")
+
     wb = _lwb(monthly_file)
     ws1 = wb.worksheets[0]
 
@@ -329,6 +338,10 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
             ws1.cell(row=row_s1, column=35).value = abs(meituan["配送服务费"])
         if meituan.get("其他类") is not None:
             ws1.cell(row=row_s1, column=36).value = abs(meituan["其他类"])
+
+    if ad_promo:
+        if ad_promo.get("变化金额") is not None:
+            ws1.cell(row=row_s1, column=30).value = abs(ad_promo["变化金额"])
 
     wb.save(monthly_file)
     wb.close()
@@ -1078,6 +1091,63 @@ def main():
                         for key in meituan_csv_fields:
                             writer.writerow([key, bill_data.get(key, 0)])
                     logger.info(f"  已保存CSV: {csv_file}")
+
+                    # ── 美团推广消费 ──────────────────────────────
+                    logger.info("  [导航] 前往美团推广账户详情页...")
+                    chrome_page.goto(MEITUAN_AD_URL)
+                    chrome_page.wait_for_load_state("networkidle", timeout=120_000)
+                    time.sleep(3)
+
+                    ad_search_js = f"""
+                        (function() {{
+                            var rows = document.querySelectorAll('.panel-body table tbody tr');
+                            for (var i = 0; i < rows.length; i++) {{
+                                var tds = rows[i].querySelectorAll('td');
+                                if (tds.length < 4) continue;
+                                if (tds[0].textContent.trim().indexOf('{date_label}') !== 0) continue;
+                                var amountSpan = tds[2].querySelector('span');
+                                var amountText = amountSpan ? amountSpan.textContent.trim() : tds[2].textContent.trim();
+                                var amount = parseFloat(amountText) || 0;
+                                var balance = parseFloat(tds[3].textContent.trim()) || 0;
+                                return {{ found: true, amount: amount, balance: balance }};
+                            }}
+                            return {{ found: false }};
+                        }})()
+                    """
+
+                    logger.info(f"  → 查找 {date_label} 的推广消费数据...")
+                    ad_data = chrome_page.evaluate(ad_search_js)
+
+                    if not ad_data.get("found"):
+                        days_diff = (datetime.now().date() - target.date()).days
+                        if days_diff > 10:
+                            target_page = 2 + (days_diff - 11) // 10
+                            logger.info(f"  目标日期不在第1页，跳转到第 {target_page} 页...")
+                            chrome_page.evaluate(f"""
+                                (function() {{
+                                    var input = document.querySelector('.jump input.form-control');
+                                    var nativeSet = Object.getOwnPropertyDescriptor(
+                                        HTMLInputElement.prototype, 'value').set;
+                                    nativeSet.call(input, '{target_page}');
+                                    input.dispatchEvent(new Event('input', {{bubbles: true}}));
+                                    input.dispatchEvent(new Event('change', {{bubbles: true}}));
+                                    document.querySelector('.jump button.btn').click();
+                                }})()
+                            """)
+                            time.sleep(3)
+                            ad_data = chrome_page.evaluate(ad_search_js)
+
+                    if ad_data.get("found"):
+                        logger.info(f"  推广消费数据: 变化金额={ad_data['amount']}, 余额={ad_data['balance']}")
+                        ad_csv_file = output_dir / f"美团外卖推广消费_{mt_store_short}_{date_label}.csv"
+                        with open(ad_csv_file, "w", newline="", encoding="utf-8-sig") as f:
+                            writer = csv.writer(f)
+                            writer.writerow(["项目", "金额"])
+                            writer.writerow(["变化金额", ad_data["amount"]])
+                            writer.writerow(["余额", ad_data["balance"]])
+                        logger.info(f"  已保存推广消费CSV: {ad_csv_file}")
+                    else:
+                        logger.warning(f"  未找到 {date_label} 的推广消费数据")
 
                 except Exception as e:
                     logger.error(f"美团外卖账单明细下载失败 ({mt_store_short}): {e}")
