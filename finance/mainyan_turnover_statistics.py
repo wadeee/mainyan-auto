@@ -981,9 +981,9 @@ def main():
             # logger.info(f"  麦安研营业统计格式化全部完成！")
             # logger.info(f"{'=' * 55}\n")
 
-            # ── Part 3：下载美团外卖订单明细 ─────────────────────────────
+            # ── Part 3：下载美团外卖账单明细 ─────────────────────────────
             logger.info(f"{'─' * 55}")
-            logger.info(f"  Part 3：下载美团外卖订单明细")
+            logger.info(f"  Part 3：下载美团外卖账单明细")
             logger.info(f"{'─' * 55}")
 
             for mt_idx, mt_config in enumerate(MEITUAN_STORE_CONFIG):
@@ -1019,16 +1019,17 @@ def main():
                     time.sleep(3)
 
                     # 设置日期
-                    logger.info(f"  → 设置日期: {date_label}...")
+                    date_input_value = f"{date_label} 日账单"
+                    logger.info(f"  → 设置日期: {date_input_value}...")
                     date_input = chrome_page.locator(".select-input-wrapper .roo-input")
                     date_input.click()
                     time.sleep(0.5)
                     date_input.press("Control+a")
-                    date_input.type(date_label, delay=50)
+                    date_input.type(date_input_value, delay=50)
                     date_input.press("Enter")
                     time.sleep(0.5)
                     chrome_page.locator("body").click(position={"x": 0, "y": 0})
-                    logger.info(f"  已设置日期: {date_label}")
+                    logger.info(f"  已设置日期: {date_input_value}")
 
                     # 等待数据刷新
                     logger.info("  等待数据刷新...")
@@ -1064,7 +1065,7 @@ def main():
 
                     # 保存为 CSV
                     meituan_csv_fields = ["商品总价", "打包费", "商家对顾客的活动补贴", "佣金", "配送服务费", "其他类"]
-                    csv_file = output_dir / f"订单明细_{mt_store_short}_{date_label}.csv"
+                    csv_file = output_dir / f"账单明细_{mt_store_short}_{date_label}.csv"
                     with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
                         writer = csv.writer(f)
                         writer.writerow(["项目", "金额"])
@@ -1073,7 +1074,7 @@ def main():
                     logger.info(f"  已保存CSV: {csv_file}")
 
                 except Exception as e:
-                    logger.error(f"美团外卖订单明细下载失败 ({mt_store_short}): {e}")
+                    logger.error(f"美团外卖账单明细下载失败 ({mt_store_short}): {e}")
                     if chrome_page:
                         try:
                             screenshot = OUTPUT_DIR / f"meituan_error_{mt_store_short}.png"
@@ -1098,7 +1099,7 @@ def main():
                         pass
 
             logger.info(f"{'=' * 55}")
-            logger.info(f"  美团外卖订单明细下载全部完成！")
+            logger.info(f"  美团外卖账单明细下载全部完成！")
             logger.info(f"{'=' * 55}\n")
 
         except Exception as e:
