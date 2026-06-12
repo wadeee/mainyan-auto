@@ -810,7 +810,7 @@ def main():
         page.set_default_navigation_timeout(120000)
 
         try:
-            login(page)
+            # login(page)
 
             output_dir = OUTPUT_DIR / "原始下载" / date_label
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -1026,6 +1026,8 @@ def main():
                     date_input.press("Control+a")
                     date_input.type(date_label, delay=50)
                     date_input.press("Enter")
+                    time.sleep(0.5)
+                    chrome_page.locator("body").click(position={"x": 0, "y": 0})
                     logger.info(f"  已设置日期: {date_label}")
 
                     # 等待数据刷新
