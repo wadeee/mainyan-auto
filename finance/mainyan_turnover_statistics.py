@@ -792,7 +792,7 @@ def main():
         try:
             login(page)
 
-            output_dir = OUTPUT_DIR / date_label
+            output_dir = OUTPUT_DIR / "原始下载" / date_label
             output_dir.mkdir(parents=True, exist_ok=True)
 
             logger.info(f"{'─' * 55}")
