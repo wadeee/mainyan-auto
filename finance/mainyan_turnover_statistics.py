@@ -59,17 +59,17 @@ MEITUAN_DOWNLOAD_URL = "https://waimaieapp.meituan.com/finance/static/gray_html_
 MEITUAN_STORE_CONFIG = [
     {
         "store_short": "宝泰店",
-        "port": 9222,
-        "user_data_dir": r"C:\ChromeDebug",
+        "port": 9223,
+        "user_data_dir": r"C:\ChromeDebug_BT",
     },
     # {
     #     "store_short": "龙江店",
-    #     "port": 9223,
+    #     "port": 9224,
     #     "user_data_dir": r"C:\ChromeDebug_LJ",
     # },
     # {
     #     "store_short": "杏坛店",
-    #     "port": 9224,
+    #     "port": 9225,
     #     "user_data_dir": r"C:\ChromeDebug_XT",
     # },
 ]
