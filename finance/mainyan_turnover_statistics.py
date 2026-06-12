@@ -1036,7 +1036,7 @@ def main():
                 logger.info(f"  启动 Chrome (port={mt_port}, profile={mt_user_data_dir})...")
                 chrome_process = subprocess.Popen([
                     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                    "--headless=new",
+                    *(["--headless=new"] if args.headless else []),
                     f"--remote-debugging-port={mt_port}",
                     f"--user-data-dir={mt_user_data_dir}",
                 ])
@@ -1206,7 +1206,7 @@ def main():
             logger.info(f"  启动 Chrome (port=9226, profile=C:\\ChromeDebug_MTJYB)...")
             jyb_chrome_process = subprocess.Popen([
                 r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                #         "--headless=new",
+                *(["--headless=new"] if args.headless else []),
                 "--remote-debugging-port=9226",
                 r"--user-data-dir=C:\ChromeDebug_MTJYB",
             ])
