@@ -62,16 +62,16 @@ MEITUAN_STORE_CONFIG = [
         "port": 9223,
         "user_data_dir": r"C:\ChromeDebug_BT",
     },
-    # {
-    #     "store_short": "龙江店",
-    #     "port": 9224,
-    #     "user_data_dir": r"C:\ChromeDebug_LJ",
-    # },
-    # {
-    #     "store_short": "杏坛店",
-    #     "port": 9225,
-    #     "user_data_dir": r"C:\ChromeDebug_XT",
-    # },
+    {
+        "store_short": "龙江店",
+        "port": 9224,
+        "user_data_dir": r"C:\ChromeDebug_LJ",
+    },
+    {
+        "store_short": "杏坛店",
+        "port": 9225,
+        "user_data_dir": r"C:\ChromeDebug_XT",
+    },
 ]
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "麦安研营业统计"
@@ -834,176 +834,176 @@ def main():
         page.set_default_navigation_timeout(120000)
 
         try:
-            # login(page)
+            login(page)
 
             output_dir = OUTPUT_DIR / "原始下载" / date_label
             output_dir.mkdir(parents=True, exist_ok=True)
 
-            # logger.info(f"{'─' * 55}")
-            # logger.info(f"  下载营业概况日度统计")
-            # logger.info(f"{'─' * 55}")
-            #
-            # for i, store in enumerate(STORES):
-            #     logger.info(f"{'─' * 40}")
-            #     logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['short']} ({store['full']})")
-            #     logger.info(f"{'─' * 40}")
-            #
-            #     logger.info("  [导航] 前往营业概况页面...")
-            #     page.goto(BUSINESS_SUMMARY_URL)
-            #     page.wait_for_load_state("networkidle", timeout=120_000)
-            #     logger.info(f"  已到达 → {page.url}")
-            #
-            #     select_store(page, store["full"])
-            #
-            #     logger.info(f"  → 设置日期: {target_str}...")
-            #     set_date(page, "开始日期", f"{target_str} 00:00")
-            #     set_date(page, "结束日期", f"{target_str} 23:59")
-            #
-            #     logger.info("  [查询] 执行查询...")
-            #     click_by_text(page, "查询", "查询")
-            #     page.wait_for_load_state("networkidle", timeout=150_000)
-            #     time.sleep(3)
-            #
-            #     logger.info("  [导出] 导出文件...")
-            #     with page.expect_download(timeout=180_000) as dl_info:
-            #         click_export(page)
-            #
-            #     download = dl_info.value
-            #     logger.info(f"  下载文件名: {download.suggested_filename}")
-            #
-            #     dest = output_dir / f"营业概况_{store['short']}_{date_label}.xlsx"
-            #     download.save_as(dest)
-            #     logger.info(f"  已保存到: {dest}")
-            #
-            # logger.info(f"{'=' * 55}")
-            # logger.info(f"  营业概况下载全部完成！")
-            # logger.info(f"  输出目录: {output_dir}")
-            # logger.info(f"{'=' * 55}\n")
-            #
-            # # ── Part 1.5：下载银豹付交易账单 ─────────────────────────────
-            # logger.info(f"{'─' * 55}")
-            # logger.info(f"  下载银豹付交易账单")
-            # logger.info(f"{'─' * 55}")
-            #
-            # for i, up_config in enumerate(UNIONPAY_STORE_CONFIG):
-            #     store_short = up_config["store_short"]
-            #     logger.info(f"{'─' * 40}")
-            #     logger.info(f"  门店 {i + 1}/{len(UNIONPAY_STORE_CONFIG)}: {store_short}")
-            #     logger.info(f"{'─' * 40}")
-            #
-            #     logger.info("  [导航] 前往银豹付交易账单页面...")
-            #     page.goto(UNIONPAY_BILL_URL)
-            #     page.wait_for_load_state("networkidle", timeout=120_000)
-            #     time.sleep(2)
-            #
-            #     logger.info(f"  → 设置日期: {target_str}...")
-            #     set_vue_date(page, target_str)
-            #     time.sleep(1)
-            #
-            #     select_unionpay_store(page, up_config)
-            #     time.sleep(0.5)
-            #
-            #     logger.info("  [搜索] 点击搜索...")
-            #     click_by_text(page, "搜索", "搜索")
-            #     page.wait_for_load_state("networkidle", timeout=150_000)
-            #     time.sleep(3)
-            #
-            #     bill_data = scrape_unionpay_bill(page)
-            #     save_unionpay_bill_csv(bill_data, store_short, date_label, output_dir)
-            #
-            # logger.info(f"{'=' * 55}")
-            # logger.info(f"  银豹付交易账单下载全部完成！")
-            # logger.info(f"  输出目录: {output_dir}")
-            # logger.info(f"{'=' * 55}\n")
-            #
-            # # ── Part 1.6：下载会员消费汇总表 ─────────────────────────────
-            # logger.info(f"{'─' * 55}")
-            # logger.info(f"  下载会员消费汇总表")
-            # logger.info(f"{'─' * 55}")
-            #
-            # for i, cs_config in enumerate(CUSTOMER_SUMMARY_STORE_CONFIG):
-            #     store_short = cs_config["store_short"]
-            #     logger.info(f"{'─' * 40}")
-            #     logger.info(f"  门店 {i + 1}/{len(CUSTOMER_SUMMARY_STORE_CONFIG)}: {store_short}")
-            #     logger.info(f"{'─' * 40}")
-            #
-            #     logger.info("  [导航] 前往会员消费汇总表页面...")
-            #     page.goto(CUSTOMER_SUMMARY_URL)
-            #     page.wait_for_load_state("networkidle", timeout=120_000)
-            #     time.sleep(2)
-            #
-            #     select_store_type_consumption(page)
-            #
-            #     select_stores_multi(page, cs_config["select_items"])
-            #
-            #     date_dash = target_str.replace(".", "-")
-            #     logger.info(f"  → 设置统计时间: {date_dash}...")
-            #     result = page.evaluate(f"""
-            #         (function() {{
-            #             function setVal(id, val) {{
-            #                 var inp = document.getElementById(id);
-            #                 if (!inp) return 'not found: ' + id;
-            #                 if (window.jQuery && jQuery.fn.datepicker) {{
-            #                     jQuery(inp).datepicker('setDate', val);
-            #                 }}
-            #                 var nativeSet = Object.getOwnPropertyDescriptor(
-            #                     HTMLInputElement.prototype, 'value').set;
-            #                 nativeSet.call(inp, val);
-            #                 inp.dispatchEvent(new Event('input', {{bubbles: true}}));
-            #                 inp.dispatchEvent(new Event('change', {{bubbles: true}}));
-            #                 inp.dispatchEvent(new Event('blur', {{bubbles: true}}));
-            #                 return inp.value;
-            #             }}
-            #             var r1 = setVal('txt_startDatetime', '{date_dash}');
-            #             var r2 = setVal('txt_endDatetime', '{date_dash}');
-            #             return 'start=' + r1 + ', end=' + r2;
-            #         }})()
-            #     """)
-            #     logger.info(f"  统计时间: {result}")
-            #
-            #     logger.info("  [查询] 执行查询...")
-            #     page.locator("#btnSearch").click()
-            #     page.wait_for_load_state("networkidle", timeout=150_000)
-            #     time.sleep(3)
-            #
-            #     logger.info("  [导出] 点击导出销售单据...")
-            #     click_by_text(page, "导出销售单据", "导出销售单据")
-            #     time.sleep(2)
-            #
-            #     logger.info("  [导出] 点击弹窗中的导出...")
-            #     with page.expect_download(timeout=180_000) as dl_info:
-            #         click_by_text(page, "导出", "弹窗导出")
-            #
-            #     download = dl_info.value
-            #     logger.info(f"  下载文件名: {download.suggested_filename}")
-            #
-            #     dest = output_dir / f"会员消费汇总表_{store_short}_{date_label}.xlsx"
-            #     download.save_as(dest)
-            #     logger.info(f"  已保存到: {dest}")
-            #
-            # logger.info(f"{'=' * 55}")
-            # logger.info(f"  会员消费汇总表下载全部完成！")
-            # logger.info(f"  输出目录: {output_dir}")
-            # logger.info(f"{'=' * 55}\n")
-            #
-            # # ── Part 2：格式化数据并写入月度统计表 ──────────────────────────
-            # logger.info(f"{'─' * 55}")
-            # logger.info(f"  Part 2：格式化数据并写入月度统计表")
-            # logger.info(f"{'─' * 55}")
-            #
-            # for i, store in enumerate(STORES):
-            #     logger.info(f"{'─' * 40}")
-            #     logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['template_name']}")
-            #     logger.info(f"{'─' * 40}")
-            #
-            #     monthly_file, created = create_or_open_monthly_file(
-            #         store, target, TEMPLATE_FILE, OUTPUT_DIR
-            #     )
-            #     fill_daily_data(monthly_file, target, store, output_dir)
-            #
-            # logger.info(f"{'=' * 55}")
-            # logger.info(f"  麦安研营业统计格式化全部完成！")
-            # logger.info(f"{'=' * 55}\n")
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  下载营业概况日度统计")
+            logger.info(f"{'─' * 55}")
+
+            for i, store in enumerate(STORES):
+                logger.info(f"{'─' * 40}")
+                logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['short']} ({store['full']})")
+                logger.info(f"{'─' * 40}")
+
+                logger.info("  [导航] 前往营业概况页面...")
+                page.goto(BUSINESS_SUMMARY_URL)
+                page.wait_for_load_state("networkidle", timeout=120_000)
+                logger.info(f"  已到达 → {page.url}")
+
+                select_store(page, store["full"])
+
+                logger.info(f"  → 设置日期: {target_str}...")
+                set_date(page, "开始日期", f"{target_str} 00:00")
+                set_date(page, "结束日期", f"{target_str} 23:59")
+
+                logger.info("  [查询] 执行查询...")
+                click_by_text(page, "查询", "查询")
+                page.wait_for_load_state("networkidle", timeout=150_000)
+                time.sleep(3)
+
+                logger.info("  [导出] 导出文件...")
+                with page.expect_download(timeout=180_000) as dl_info:
+                    click_export(page)
+
+                download = dl_info.value
+                logger.info(f"  下载文件名: {download.suggested_filename}")
+
+                dest = output_dir / f"营业概况_{store['short']}_{date_label}.xlsx"
+                download.save_as(dest)
+                logger.info(f"  已保存到: {dest}")
+
+            logger.info(f"{'=' * 55}")
+            logger.info(f"  营业概况下载全部完成！")
+            logger.info(f"  输出目录: {output_dir}")
+            logger.info(f"{'=' * 55}\n")
+
+            # ── Part 1.5：下载银豹付交易账单 ─────────────────────────────
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  下载银豹付交易账单")
+            logger.info(f"{'─' * 55}")
+
+            for i, up_config in enumerate(UNIONPAY_STORE_CONFIG):
+                store_short = up_config["store_short"]
+                logger.info(f"{'─' * 40}")
+                logger.info(f"  门店 {i + 1}/{len(UNIONPAY_STORE_CONFIG)}: {store_short}")
+                logger.info(f"{'─' * 40}")
+
+                logger.info("  [导航] 前往银豹付交易账单页面...")
+                page.goto(UNIONPAY_BILL_URL)
+                page.wait_for_load_state("networkidle", timeout=120_000)
+                time.sleep(2)
+
+                logger.info(f"  → 设置日期: {target_str}...")
+                set_vue_date(page, target_str)
+                time.sleep(1)
+
+                select_unionpay_store(page, up_config)
+                time.sleep(0.5)
+
+                logger.info("  [搜索] 点击搜索...")
+                click_by_text(page, "搜索", "搜索")
+                page.wait_for_load_state("networkidle", timeout=150_000)
+                time.sleep(3)
+
+                bill_data = scrape_unionpay_bill(page)
+                save_unionpay_bill_csv(bill_data, store_short, date_label, output_dir)
+
+            logger.info(f"{'=' * 55}")
+            logger.info(f"  银豹付交易账单下载全部完成！")
+            logger.info(f"  输出目录: {output_dir}")
+            logger.info(f"{'=' * 55}\n")
+
+            # ── Part 1.6：下载会员消费汇总表 ─────────────────────────────
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  下载会员消费汇总表")
+            logger.info(f"{'─' * 55}")
+
+            for i, cs_config in enumerate(CUSTOMER_SUMMARY_STORE_CONFIG):
+                store_short = cs_config["store_short"]
+                logger.info(f"{'─' * 40}")
+                logger.info(f"  门店 {i + 1}/{len(CUSTOMER_SUMMARY_STORE_CONFIG)}: {store_short}")
+                logger.info(f"{'─' * 40}")
+
+                logger.info("  [导航] 前往会员消费汇总表页面...")
+                page.goto(CUSTOMER_SUMMARY_URL)
+                page.wait_for_load_state("networkidle", timeout=120_000)
+                time.sleep(2)
+
+                select_store_type_consumption(page)
+
+                select_stores_multi(page, cs_config["select_items"])
+
+                date_dash = target_str.replace(".", "-")
+                logger.info(f"  → 设置统计时间: {date_dash}...")
+                result = page.evaluate(f"""
+                    (function() {{
+                        function setVal(id, val) {{
+                            var inp = document.getElementById(id);
+                            if (!inp) return 'not found: ' + id;
+                            if (window.jQuery && jQuery.fn.datepicker) {{
+                                jQuery(inp).datepicker('setDate', val);
+                            }}
+                            var nativeSet = Object.getOwnPropertyDescriptor(
+                                HTMLInputElement.prototype, 'value').set;
+                            nativeSet.call(inp, val);
+                            inp.dispatchEvent(new Event('input', {{bubbles: true}}));
+                            inp.dispatchEvent(new Event('change', {{bubbles: true}}));
+                            inp.dispatchEvent(new Event('blur', {{bubbles: true}}));
+                            return inp.value;
+                        }}
+                        var r1 = setVal('txt_startDatetime', '{date_dash}');
+                        var r2 = setVal('txt_endDatetime', '{date_dash}');
+                        return 'start=' + r1 + ', end=' + r2;
+                    }})()
+                """)
+                logger.info(f"  统计时间: {result}")
+
+                logger.info("  [查询] 执行查询...")
+                page.locator("#btnSearch").click()
+                page.wait_for_load_state("networkidle", timeout=150_000)
+                time.sleep(3)
+
+                logger.info("  [导出] 点击导出销售单据...")
+                click_by_text(page, "导出销售单据", "导出销售单据")
+                time.sleep(2)
+
+                logger.info("  [导出] 点击弹窗中的导出...")
+                with page.expect_download(timeout=180_000) as dl_info:
+                    click_by_text(page, "导出", "弹窗导出")
+
+                download = dl_info.value
+                logger.info(f"  下载文件名: {download.suggested_filename}")
+
+                dest = output_dir / f"会员消费汇总表_{store_short}_{date_label}.xlsx"
+                download.save_as(dest)
+                logger.info(f"  已保存到: {dest}")
+
+            logger.info(f"{'=' * 55}")
+            logger.info(f"  会员消费汇总表下载全部完成！")
+            logger.info(f"  输出目录: {output_dir}")
+            logger.info(f"{'=' * 55}\n")
+
+            # ── Part 2：格式化数据并写入月度统计表 ──────────────────────────
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  Part 2：格式化数据并写入月度统计表")
+            logger.info(f"{'─' * 55}")
+
+            for i, store in enumerate(STORES):
+                logger.info(f"{'─' * 40}")
+                logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['template_name']}")
+                logger.info(f"{'─' * 40}")
+
+                monthly_file, created = create_or_open_monthly_file(
+                    store, target, TEMPLATE_FILE, OUTPUT_DIR
+                )
+                fill_daily_data(monthly_file, target, store, output_dir)
+
+            logger.info(f"{'=' * 55}")
+            logger.info(f"  麦安研营业统计格式化全部完成！")
+            logger.info(f"{'=' * 55}\n")
 
             # ── Part 3：下载美团外卖账单明细 ─────────────────────────────
             logger.info(f"{'─' * 55}")
