@@ -318,17 +318,17 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
 
     if meituan:
         if meituan.get("商品总价") is not None:
-            ws1.cell(row=row_s1, column=30).value = meituan["商品总价"]
+            ws1.cell(row=row_s1, column=30).value = abs(meituan["商品总价"])
         if meituan.get("打包费") is not None:
-            ws1.cell(row=row_s1, column=31).value = meituan["打包费"]
+            ws1.cell(row=row_s1, column=31).value = abs(meituan["打包费"])
         if meituan.get("商家对顾客的活动补贴") is not None:
-            ws1.cell(row=row_s1, column=32).value = meituan["商家对顾客的活动补贴"]
+            ws1.cell(row=row_s1, column=32).value = abs(meituan["商家对顾客的活动补贴"])
         if meituan.get("佣金") is not None:
-            ws1.cell(row=row_s1, column=33).value = meituan["佣金"]
+            ws1.cell(row=row_s1, column=33).value = abs(meituan["佣金"])
         if meituan.get("配送服务费") is not None:
-            ws1.cell(row=row_s1, column=34).value = meituan["配送服务费"]
+            ws1.cell(row=row_s1, column=34).value = abs(meituan["配送服务费"])
         if meituan.get("其他类") is not None:
-            ws1.cell(row=row_s1, column=35).value = meituan["其他类"]
+            ws1.cell(row=row_s1, column=35).value = abs(meituan["其他类"])
 
     wb.save(monthly_file)
     wb.close()
@@ -986,25 +986,6 @@ def main():
             logger.info(f"  输出目录: {output_dir}")
             logger.info(f"{'=' * 55}\n")
 
-            # ── Part 2：格式化数据并写入月度统计表 ──────────────────────────
-            logger.info(f"{'─' * 55}")
-            logger.info(f"  Part 2：格式化数据并写入月度统计表")
-            logger.info(f"{'─' * 55}")
-
-            for i, store in enumerate(STORES):
-                logger.info(f"{'─' * 40}")
-                logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['template_name']}")
-                logger.info(f"{'─' * 40}")
-
-                monthly_file, created = create_or_open_monthly_file(
-                    store, target, TEMPLATE_FILE, OUTPUT_DIR
-                )
-                fill_daily_data(monthly_file, target, store, output_dir)
-
-            logger.info(f"{'=' * 55}")
-            logger.info(f"  麦安研营业统计格式化全部完成！")
-            logger.info(f"{'=' * 55}\n")
-
             # ── Part 3：下载美团外卖账单明细 ─────────────────────────────
             logger.info(f"{'─' * 55}")
             logger.info(f"  Part 3：下载美团外卖账单明细")
@@ -1124,6 +1105,25 @@ def main():
 
             logger.info(f"{'=' * 55}")
             logger.info(f"  美团外卖账单明细下载全部完成！")
+            logger.info(f"{'=' * 55}\n")
+
+            # ── Part 4：格式化数据并写入月度统计表 ──────────────────────────
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  Part 4：格式化数据并写入月度统计表")
+            logger.info(f"{'─' * 55}")
+
+            for i, store in enumerate(STORES):
+                logger.info(f"{'─' * 40}")
+                logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['template_name']}")
+                logger.info(f"{'─' * 40}")
+
+                monthly_file, created = create_or_open_monthly_file(
+                    store, target, TEMPLATE_FILE, OUTPUT_DIR
+                )
+                fill_daily_data(monthly_file, target, store, output_dir)
+
+            logger.info(f"{'=' * 55}")
+            logger.info(f"  麦安研营业统计格式化全部完成！")
             logger.info(f"{'=' * 55}\n")
 
         except Exception as e:
