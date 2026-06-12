@@ -45,8 +45,8 @@ logger = logging.getLogger(__name__)
 # ─── 配置区（按需修改）─────────────────────────────────────────────────────────
 # 账号信息同 factory_delivery_tsj_weekly.py
 ACCOUNT = "huomimayzb"
-WORKER_ID = "M006"
-PASSWORD = "tusijia88"
+WORKER_ID = "M001"
+PASSWORD = "666888"
 
 LOGIN_URL = "https://beta69.pospal.cn/"
 PRODUCT_SALE_URL = "https://beta69.pospal.cn/ReportV2/ProductSale"
