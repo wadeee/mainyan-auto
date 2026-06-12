@@ -278,6 +278,16 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
     else:
         customer = read_customer_summary(customer_file)
 
+    meituan_file = daily_download_dir / f"账单明细_{store['short']}_{date_label}.csv"
+    if not meituan_file.exists():
+        logger.warning(f"  美团账单明细不存在，跳过填写: {meituan_file.name}")
+        meituan = None
+    else:
+        meituan = read_unionpay_bill_csv(meituan_file)
+        logger.info(f"  读取美团 商品总价 = {meituan.get('商品总价')}")
+        logger.info(f"  读取美团 打包费 = {meituan.get('打包费')}")
+        logger.info(f"  读取美团 其他类 = {meituan.get('其他类')}")
+
     wb = _lwb(monthly_file)
     ws1 = wb.worksheets[0]
 
@@ -305,6 +315,20 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
             ws1.cell(row=row_s1, column=25).value = customer["principal"]
         if customer["gift"] is not None:
             ws1.cell(row=row_s1, column=26).value = customer["gift"]
+
+    if meituan:
+        if meituan.get("商品总价") is not None:
+            ws1.cell(row=row_s1, column=30).value = meituan["商品总价"]
+        if meituan.get("打包费") is not None:
+            ws1.cell(row=row_s1, column=31).value = meituan["打包费"]
+        if meituan.get("商家对顾客的活动补贴") is not None:
+            ws1.cell(row=row_s1, column=32).value = meituan["商家对顾客的活动补贴"]
+        if meituan.get("佣金") is not None:
+            ws1.cell(row=row_s1, column=33).value = meituan["佣金"]
+        if meituan.get("配送服务费") is not None:
+            ws1.cell(row=row_s1, column=34).value = meituan["配送服务费"]
+        if meituan.get("其他类") is not None:
+            ws1.cell(row=row_s1, column=35).value = meituan["其他类"]
 
     wb.save(monthly_file)
     wb.close()
