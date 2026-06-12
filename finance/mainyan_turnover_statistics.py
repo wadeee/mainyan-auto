@@ -1057,7 +1057,7 @@ def main():
 
                     # 等待数据刷新
                     logger.info("  等待数据刷新...")
-                    time.sleep(3)
+                    time.sleep(5)
 
                     # 从 tfoot 总计行抓取数据
                     logger.info("  → 抓取账单数据...")
