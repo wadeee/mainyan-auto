@@ -46,8 +46,8 @@ logger = logging.getLogger(__name__)
 
 # ─── 配置区（按需修改）─────────────────────────────────────────────────────────
 ACCOUNT = "huomimayzb"
-WORKER_ID = "M006"
-PASSWORD = "tusijia88"
+WORKER_ID = "M008"
+PASSWORD = "Maianyan88"
 
 LOGIN_URL = "https://beta69.pospal.cn/"
 BUSINESS_SUMMARY_URL = "https://beta69.pospal.cn/Report/BusinessSummaryV2"
