@@ -177,7 +177,7 @@ def _parse_numeric(val):
     if val is None:
         return None
     try:
-        return float(str(val).strip())
+        return float(str(val).strip().replace(",", ""))
     except (ValueError, TypeError):
         return val
 
@@ -616,7 +616,7 @@ def scrape_unionpay_bill(page):
                 title = title.replace(/\\s+/g, ' ').trim();
                 var numEl = items[i].querySelector('.num');
                 if (!numEl) continue;
-                var numText = numEl.textContent.replace(/[￥\\s]/g, '').trim();
+                var numText = numEl.textContent.replace(/[￥,\\s]/g, '').trim();
                 result[title] = parseFloat(numText) || 0;
             }
             return result;
@@ -737,7 +737,7 @@ def scrape_zhaohang_daily_summary(page, target_str, date_label, zh_config, outpu
             for (var i = 0; i < rows.length; i++) {
                 var tds = rows[i].querySelectorAll('td');
                 if (tds.length >= 16) {
-                    var val = parseFloat(tds[15].textContent.trim()) || 0;
+                    var val = parseFloat(tds[15].textContent.trim().replace(/,/g, '')) || 0;
                     totalReceived += val;
                 }
             }
@@ -1592,11 +1592,11 @@ def main():
                             var tfoot = document.querySelector('.bill-charge-table tfoot tr');
                             if (tfoot) {
                                 var tds = tfoot.querySelectorAll('td');
-                                result['商品总价'] = parseFloat(tds[1].textContent.trim()) || 0;
-                                result['打包费'] = parseFloat(tds[2].textContent.trim()) || 0;
-                                result['商家对顾客的活动补贴'] = parseFloat(tds[3].textContent.trim()) || 0;
-                                result['佣金'] = parseFloat(tds[6].textContent.trim()) || 0;
-                                result['配送服务费'] = parseFloat(tds[7].textContent.trim()) || 0;
+                                result['商品总价'] = parseFloat(tds[1].textContent.trim().replace(/,/g, '')) || 0;
+                                result['打包费'] = parseFloat(tds[2].textContent.trim().replace(/,/g, '')) || 0;
+                                result['商家对顾客的活动补贴'] = parseFloat(tds[3].textContent.trim().replace(/,/g, '')) || 0;
+                                result['佣金'] = parseFloat(tds[6].textContent.trim().replace(/,/g, '')) || 0;
+                                result['配送服务费'] = parseFloat(tds[7].textContent.trim().replace(/,/g, '')) || 0;
                             }
                             var tabs = document.querySelectorAll('.roo-tabs-nav .tab-item a');
                             for (var i = 0; i < tabs.length; i++) {
@@ -1637,8 +1637,8 @@ def main():
                                 if (tds[0].textContent.trim().indexOf('{date_label}') !== 0) continue;
                                 var amountSpan = tds[2].querySelector('span');
                                 var amountText = amountSpan ? amountSpan.textContent.trim() : tds[2].textContent.trim();
-                                var amount = parseFloat(amountText) || 0;
-                                var balance = parseFloat(tds[3].textContent.trim()) || 0;
+                                var amount = parseFloat(amountText.replace(/,/g, '')) || 0;
+                                var balance = parseFloat(tds[3].textContent.trim().replace(/,/g, '')) || 0;
                                 return {{ found: true, amount: amount, balance: balance }};
                             }}
                             return {{ found: false }};
@@ -1715,9 +1715,9 @@ def main():
                                 if (rows.length < 2) return result;
                                 var ths = rows[1].querySelectorAll('th');
                                 if (ths.length >= 4) {
-                                    result['结算金额'] = parseFloat(ths[1].textContent.trim()) || 0;
-                                    result['订单类'] = parseFloat(ths[2].textContent.trim()) || 0;
-                                    result['其他类'] = parseFloat(ths[3].textContent.trim()) || 0;
+                                    result['结算金额'] = parseFloat(ths[1].textContent.trim().replace(/,/g, '')) || 0;
+                                    result['订单类'] = parseFloat(ths[2].textContent.trim().replace(/,/g, '')) || 0;
+                                    result['其他类'] = parseFloat(ths[3].textContent.trim().replace(/,/g, '')) || 0;
                                 }
                                 return result;
                             })()
