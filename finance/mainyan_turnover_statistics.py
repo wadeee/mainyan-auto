@@ -57,6 +57,7 @@ CUSTOMER_SUMMARY_URL = "https://beta69.pospal.cn/CustomerReport/CustomerConsumer
 MEITUAN_DOWNLOAD_URL = "https://waimaieapp.meituan.com/finance/static/gray_html_pc/billReconciliation.html#/daily-bill"
 MEITUAN_AD_URL = "https://waimaieapp.meituan.com/ad/v1/pc#/account"
 MEITUAN_JYB_URL = "https://ecom.meituan.com/finance-kdb/profit/home"
+ELEME_BILL_URL = "https://napos-bill-pc.faas.ele.me/napos-bill-pc/v2/bill-checking?shopType=SINGLE"
 
 MEITUAN_STORE_CONFIG = [
     {
@@ -75,6 +76,8 @@ MEITUAN_STORE_CONFIG = [
         "user_data_dir": r"C:\ChromeDebug_XT",
     },
 ]
+
+ELEME_STORE_CONFIG = {"宝泰店"}
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "麦安研营业统计"
 TEMPLATE_FILE = Path(__file__).resolve().parent / "麦安研营业统计_格式化模板.xlsx"
@@ -307,6 +310,14 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
         logger.info(f"  读取经营宝 售价={jyb.get('售价')}, 促销费={jyb.get('促销费')}, "
                     f"服务费={jyb.get('服务费')}, 其他费用={jyb.get('其他费用')}")
 
+    eleme_file = daily_download_dir / f"饿了么账单_{store['short']}_{date_label}.csv"
+    if not eleme_file.exists():
+        logger.warning(f"  饿了么账单不存在，跳过填写: {eleme_file.name}")
+        eleme = None
+    else:
+        eleme = read_unionpay_bill_csv(eleme_file)
+        logger.info(f"  读取饿了么 订单类={eleme.get('订单类')}, 其他类={eleme.get('其他类')}")
+
     wb = _lwb(monthly_file)
     ws1 = wb.worksheets[0]
 
@@ -362,6 +373,12 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
             ws1.cell(row=row_s1, column=41).value = jyb["服务费"]
         if jyb.get("其他费用") is not None:
             ws1.cell(row=row_s1, column=42).value = jyb["其他费用"]
+
+    if eleme:
+        if eleme.get("订单类") is not None:
+            ws1.cell(row=row_s1, column=45).value = abs(eleme["订单类"])
+        if eleme.get("其他类") is not None:
+            ws1.cell(row=row_s1, column=46).value = abs(eleme["其他类"])
 
     wb.save(monthly_file)
     wb.close()
@@ -1168,6 +1185,60 @@ def main():
                         logger.info(f"  已保存推广消费CSV: {ad_csv_file}")
                     else:
                         logger.warning(f"  未找到 {date_label} 的推广消费数据")
+
+                    # ── 饿了么账单 ──────────────────────────────
+                    if mt_store_short in ELEME_STORE_CONFIG:
+                        logger.info("  [导航] 前往饿了么账单页面...")
+                        chrome_page.goto(ELEME_BILL_URL)
+                        time.sleep(3)
+
+                        logger.info(f"  → 设置账单日期: {date_label}...")
+                        start_input = chrome_page.locator('input[placeholder="开始日期"]')
+                        start_input.click()
+                        time.sleep(0.5)
+                        start_input.press("Control+a")
+                        start_input.type(date_label, delay=50)
+                        time.sleep(0.3)
+
+                        end_input = chrome_page.locator('input[placeholder="结束日期"]')
+                        end_input.click()
+                        time.sleep(0.5)
+                        end_input.press("Control+a")
+                        end_input.type(date_label, delay=50)
+                        end_input.press("Enter")
+                        time.sleep(0.5)
+
+                        logger.info("  [查询] 点击查询...")
+                        chrome_page.locator("button.cook-btn-primary").click()
+                        time.sleep(3)
+
+                        logger.info("  → 抓取饿了么账单数据...")
+                        eleme_data = chrome_page.evaluate("""
+                            (function() {
+                                var result = {};
+                                var thead = document.querySelector('.ant-table-thead');
+                                if (!thead) return result;
+                                var rows = thead.querySelectorAll('tr');
+                                if (rows.length < 2) return result;
+                                var ths = rows[1].querySelectorAll('th');
+                                if (ths.length >= 4) {
+                                    result['结算金额'] = parseFloat(ths[1].textContent.trim()) || 0;
+                                    result['订单类'] = parseFloat(ths[2].textContent.trim()) || 0;
+                                    result['其他类'] = parseFloat(ths[3].textContent.trim()) || 0;
+                                }
+                                return result;
+                            })()
+                        """)
+                        logger.info(f"  抓取数据: {json.dumps(eleme_data, ensure_ascii=False)}")
+
+                        eleme_csv_fields = ["结算金额", "订单类", "其他类"]
+                        eleme_csv_file = output_dir / f"饿了么账单_{mt_store_short}_{date_label}.csv"
+                        with open(eleme_csv_file, "w", newline="", encoding="utf-8-sig") as f:
+                            writer = csv.writer(f)
+                            writer.writerow(["项目", "金额"])
+                            for key in eleme_csv_fields:
+                                writer.writerow([key, eleme_data.get(key, 0)])
+                        logger.info(f"  已保存CSV: {eleme_csv_file}")
 
                 except Exception as e:
                     logger.error(f"美团外卖账单明细下载失败 ({mt_store_short}): {e}")
