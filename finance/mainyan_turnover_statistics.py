@@ -58,6 +58,7 @@ MEITUAN_DOWNLOAD_URL = "https://waimaieapp.meituan.com/finance/static/gray_html_
 MEITUAN_AD_URL = "https://waimaieapp.meituan.com/ad/v1/pc#/account"
 MEITUAN_JYB_URL = "https://ecom.meituan.com/finance-kdb/profit/home"
 ELEME_BILL_URL = "https://napos-bill-pc.faas.ele.me/napos-bill-pc/v2/bill-checking?shopType=SINGLE"
+ZHAOHANG_URL = "https://ym.o2o.cmbchina.com/mc/merchant/handms/dailySummary.html"
 
 MEITUAN_STORE_CONFIG = [
     {
@@ -78,6 +79,24 @@ MEITUAN_STORE_CONFIG = [
 ]
 
 ELEME_STORE_CONFIG = {"宝泰店"}
+
+ZHAOHANG_STORE_CONFIG = [
+    {
+        "store_short": "宝泰店",
+        "store_value": "002009212000001",
+        "store_label": "MAINYAN麦安研(东方宝泰店)",
+    },
+    {
+        "store_short": "龙江店",
+        "store_value": "002009212000003",
+        "store_label": "MAINYAN麦安研(番禺万达店)",
+    },
+    {
+        "store_short": "杏坛店",
+        "store_value": "002009212000002",
+        "store_label": "MAIANYAN麦安研(大悦汇店)",
+    },
+]
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "麦安研营业统计"
 TEMPLATE_FILE = Path(__file__).resolve().parent / "麦安研营业统计_格式化模板.xlsx"
@@ -318,6 +337,14 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
         eleme = read_unionpay_bill_csv(eleme_file)
         logger.info(f"  读取饿了么 订单类={eleme.get('订单类')}, 其他类={eleme.get('其他类')}")
 
+    zhaohang_file = daily_download_dir / f"招行每日汇总_{store['short']}_{date_label}.csv"
+    if not zhaohang_file.exists():
+        logger.warning(f"  招行每日汇总不存在，跳过填写: {zhaohang_file.name}")
+        zhaohang = None
+    else:
+        zhaohang = read_unionpay_bill_csv(zhaohang_file)
+        logger.info(f"  读取招行 商户实收总计={zhaohang.get('商户实收总计')}")
+
     wb = _lwb(monthly_file)
     ws1 = wb.worksheets[0]
 
@@ -379,6 +406,10 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
             ws1.cell(row=row_s1, column=45).value = abs(eleme["订单类"])
         if eleme.get("其他类") is not None:
             ws1.cell(row=row_s1, column=46).value = abs(eleme["其他类"])
+
+    if zhaohang:
+        if zhaohang.get("商户实收总计") is not None:
+            ws1.cell(row=row_s1, column=49).value = zhaohang["商户实收总计"]
 
     wb.save(monthly_file)
     wb.close()
@@ -626,6 +657,86 @@ def read_customer_summary(data_file: Path):
     wb.close()
     logger.info(f"  合计行={total_row}, 本金消费(F)={result['principal']}, 赠送消费(G)={result['gift']}")
     return result
+
+
+def scrape_zhaohang_daily_summary(page, target_str, date_label, zh_config, output_dir):
+    """在招行每日汇总页面选择门店、设置日期、查询并抓取商户实收总计。"""
+    store_short = zh_config["store_short"]
+    store_value = zh_config["store_value"]
+    store_label = zh_config["store_label"]
+
+    logger.info(f"  → 选择门店: {store_label}")
+    page.evaluate(f"""
+        (function() {{
+            var select = document.getElementById('storelist');
+            if (!select) return 'select not found';
+            select.value = '{store_value}';
+            var event = new Event('change', {{bubbles: true}});
+            select.dispatchEvent(event);
+
+            var items = document.querySelectorAll('.searchable-select-item');
+            for (var i = 0; i < items.length; i++) {{
+                if (items[i].getAttribute('data-value') === '{store_value}') {{
+                    items[i].click();
+                    break;
+                }}
+            }}
+        }})()
+    """)
+    time.sleep(1)
+
+    date_dash = date_label
+    logger.info(f"  → 设置日期: {date_dash}...")
+    page.evaluate(f"""
+        (function() {{
+            var startInput = document.getElementById('start');
+            var endInput = document.getElementById('end');
+            if (startInput) {{
+                startInput.readOnly = false;
+                startInput.value = '{date_dash}';
+                startInput.readOnly = true;
+            }}
+            if (endInput) {{
+                endInput.readOnly = false;
+                endInput.value = '{date_dash}';
+                endInput.readOnly = true;
+            }}
+        }})()
+    """)
+    time.sleep(0.5)
+
+    logger.info("  [查询] 点击查询...")
+    page.locator("button.J-query").click()
+    time.sleep(3)
+
+    logger.info("  → 抓取商户实收总计...")
+    zh_data = page.evaluate("""
+        (function() {
+            var result = {};
+            var rows = document.querySelectorAll('.record-tbody tr.code-item');
+            var totalReceived = 0;
+            for (var i = 0; i < rows.length; i++) {
+                var tds = rows[i].querySelectorAll('td');
+                if (tds.length >= 16) {
+                    var val = parseFloat(tds[15].textContent.trim()) || 0;
+                    totalReceived += val;
+                }
+            }
+            result['商户实收总计'] = Math.round(totalReceived * 100) / 100;
+            result['row_count'] = rows.length;
+            return result;
+        })()
+    """)
+    logger.info(f"  抓取数据: 共{zh_data.get('row_count', 0)}行, 商户实收总计={zh_data.get('商户实收总计', 0)}")
+
+    csv_file = output_dir / f"招行每日汇总_{store_short}_{date_label}.csv"
+    with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(["项目", "金额"])
+        writer.writerow(["商户实收总计", zh_data.get("商户实收总计", 0)])
+    logger.info(f"  已保存CSV: {csv_file}")
+
+    return zh_data
 
 
 def select_unionpay_store(page, config):
@@ -1481,6 +1592,72 @@ def main():
 
             logger.info(f"{'=' * 55}")
             logger.info(f"  美团经营宝每日收益下载完成！")
+            logger.info(f"{'=' * 55}\n")
+
+            # ── Part 3.6：招行每日汇总 ─────────────────────────────
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  Part 3.6：下载招行每日汇总")
+            logger.info(f"{'─' * 55}")
+
+            logger.info(f"  启动 Chrome (port=9226, profile=C:\\ChromeDebug_MTJYB)...")
+            zh_chrome_process = subprocess.Popen([
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                *(["--headless=new"] if args.headless else []),
+                "--remote-debugging-port=9226",
+                r"--user-data-dir=C:\ChromeDebug_MTJYB",
+            ])
+            time.sleep(5)
+
+            zh_browser = None
+            zh_page = None
+            try:
+                logger.info("  连接到 Chrome...")
+                zh_browser = pw.chromium.connect_over_cdp("http://localhost:9226")
+                zh_context = zh_browser.contexts[0]
+                zh_page = zh_context.new_page()
+                zh_page.set_default_timeout(120000)
+                zh_page.set_default_navigation_timeout(120000)
+
+                for zh_idx, zh_config in enumerate(ZHAOHANG_STORE_CONFIG):
+                    zh_store_short = zh_config["store_short"]
+                    logger.info(f"{'─' * 40}")
+                    logger.info(f"  招行门店 {zh_idx + 1}/{len(ZHAOHANG_STORE_CONFIG)}: {zh_store_short}")
+                    logger.info(f"{'─' * 40}")
+
+                    logger.info("  [导航] 前往招行每日汇总页面...")
+                    zh_page.goto(ZHAOHANG_URL)
+                    zh_page.wait_for_load_state("networkidle", timeout=120_000)
+                    time.sleep(3)
+
+                    scrape_zhaohang_daily_summary(zh_page, target_str, date_label, zh_config, output_dir)
+
+            except Exception as e:
+                logger.error(f"招行每日汇总下载失败: {e}")
+                if zh_page:
+                    try:
+                        screenshot = OUTPUT_DIR / "zhaohang_error.png"
+                        zh_page.screenshot(path=str(screenshot))
+                        logger.info(f"  错误截图已保存: {screenshot}")
+                    except Exception:
+                        pass
+            finally:
+                if zh_page:
+                    try:
+                        zh_page.close()
+                    except Exception:
+                        pass
+                if zh_browser:
+                    try:
+                        zh_browser.close()
+                    except Exception:
+                        pass
+                try:
+                    zh_chrome_process.terminate()
+                except Exception:
+                    pass
+
+            logger.info(f"{'=' * 55}")
+            logger.info(f"  招行每日汇总下载完成！")
             logger.info(f"{'=' * 55}\n")
 
             # ── Part 4：格式化数据并写入月度统计表 ──────────────────────────
