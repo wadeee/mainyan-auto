@@ -26,6 +26,8 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from setuptools.command.egg_info import warn_depends_obsolete
+
 # ─── 日志配置 ───────────────────────────────────────────────────────────────────
 LOG_DIR = Path(__file__).resolve().parent / "log"
 LOG_DIR.mkdir(exist_ok=True)
@@ -88,6 +90,17 @@ ZHAOHANG_STORE_CONFIG = [
     }
 ]
 
+DOUYIN_LOGIN_URL = "https://life.douyin.com/"
+DOUYIN_DAILY_BENEFITS_URL = "https://life.douyin.com/p/fulfillsettle/dailyBenifits"
+DOUYIN_ACCOUNT = "18688856666"
+DOUYIN_PASSWORD = "Maianyan88"
+
+DOUYIN_STORE_CONFIG = [
+    {"store_short": "宝泰店", "search_keyword": "宝泰"},
+    {"store_short": "龙江店", "search_keyword": "龙江"},
+    {"store_short": "杏坛店", "search_keyword": "杏坛"},
+]
+
 OUTPUT_DIR = Path(__file__).resolve().parent / "麦安研营业统计"
 TEMPLATE_FILE = Path(__file__).resolve().parent / "麦安研营业统计_格式化模板.xlsx"
 
@@ -133,6 +146,8 @@ CUSTOMER_SUMMARY_STORE_CONFIG = [
 TEMPLATE_STORE_NAME = "东方宝泰店"
 
 UNIONPAY_CSV_FIELDS = ["交易金额", "交易退款金额", "有效交易金额", "交易手续费", "优惠金额", "优惠退款金额"]
+
+DOUYIN_CSV_FIELDS = ["订单实收", "佣金/服务费支出"]
 
 WEEKDAY_NAMES = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
 
@@ -335,6 +350,14 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
         zhaohang = read_unionpay_bill_csv(zhaohang_file)
         logger.info(f"  读取招行 商户实收总计={zhaohang.get('商户实收总计')}")
 
+    douyin_file = daily_download_dir / f"抖音每日收益_{store['short']}_{date_label}.csv"
+    if not douyin_file.exists():
+        logger.warning(f"  抖音每日收益不存在，跳过填写: {douyin_file.name}")
+        douyin = None
+    else:
+        douyin = read_unionpay_bill_csv(douyin_file)
+        logger.info(f"  读取抖音 订单实收={douyin.get('订单实收')}, 佣金/服务费支出={douyin.get('佣金/服务费支出')}")
+
     wb = _lwb(monthly_file)
     ws1 = wb.worksheets[0]
 
@@ -400,6 +423,12 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
     if zhaohang:
         if zhaohang.get("商户实收总计") is not None:
             ws1.cell(row=row_s1, column=49).value = zhaohang["商户实收总计"]
+
+    if douyin:
+        if douyin.get("订单实收") is not None:
+            ws1.cell(row=row_s1, column=51).value = douyin["订单实收"]
+        if douyin.get("佣金/服务费支出") is not None:
+            ws1.cell(row=row_s1, column=52).value = douyin["佣金/服务费支出"]
 
     wb.save(monthly_file)
     wb.close()
@@ -946,6 +975,369 @@ def set_vue_date(page, target_str):
         }})()
     """)
     logger.info(f"  日期已设置(fallback): {date_dash}")
+
+
+def douyin_login(page):
+    """登录抖音来客平台。"""
+    logger.info("  [抖音] 打开登录页面...")
+    page.goto(DOUYIN_LOGIN_URL)
+    # page.wait_for_load_state("networkidle")
+    time.sleep(3)
+
+    # if "/p/" in page.url:
+    #     logger.info("  [抖音] 已登录，跳过登录步骤")
+    #     return
+
+    logger.info("  [抖音] 点击「立即登录」...")
+    page.locator('text="立即登录"').first.click()
+    time.sleep(3)
+
+    logger.info("  [抖音] 切换到「密码登录」...")
+    page.locator('text="密码登录"').first.click()
+    time.sleep(2)
+
+    logger.info("  [抖音] 输入账号...")
+    phone_input = page.locator('input[placeholder*="手机"], input[placeholder*="账号"]').first
+    phone_input.click()
+    phone_input.fill(DOUYIN_ACCOUNT)
+    time.sleep(0.5)
+
+    logger.info("  [抖音] 输入密码...")
+    pwd_input = page.locator('input[type="password"]').first
+    pwd_input.click()
+    pwd_input.fill(DOUYIN_PASSWORD)
+    time.sleep(0.5)
+
+    logger.info("  [抖音] 勾选「已阅读并同意用户协议和隐私条款」...")
+    page.evaluate("""
+        (function() {
+            var cb = document.querySelector('input.life-core-check-wrapper[type="checkbox"]');
+            if (cb) { cb.click(); return 'clicked input'; }
+            var label = document.querySelector('.life-core-checkbox');
+            if (label) { label.click(); return 'clicked label'; }
+            return 'not found';
+        })()
+    """)
+    time.sleep(0.5)
+
+    logger.info("  [抖音] 点击登录按钮...")
+    login_btn = page.locator('button:text-is("登录")')
+    if login_btn.count() == 0:
+        login_btn = page.locator('button:text-is("登 录")')
+    if login_btn.count() == 0:
+        click_by_text(page, "登录", "登录")
+    else:
+        login_btn.first.click()
+
+    logger.info("  [抖音] 等待登录完成（如遇验证码请手动处理）...")
+    try:
+        page.wait_for_url("**/p/**", timeout=120_000)
+    except Exception:
+        logger.warning("  登录等待超时，继续尝试...")
+    time.sleep(10)
+    logger.info(f"  [抖音] 当前URL: {page.url}")
+
+
+def douyin_set_date(page, target):
+    """设置抖音每日收益页面的核销日期（范围选择器，起止日期相同）。"""
+    target_year = target.year
+    target_month = target.month
+    target_day = str(target.day)
+    date_str = target.strftime("%Y-%m-%d")
+
+    logger.info(f"  → 设置核销日期: {date_str} ~ {date_str}...")
+
+    # 等待页面稳定后再操作日期选择器
+    for attempt in range(3):
+        try:
+            page.wait_for_selector('.byted-date-picker', timeout=10000)
+            result = page.evaluate("""
+                (function() {
+                    var picker = document.querySelector('.byted-date-picker');
+                    if (!picker) return 'picker not found';
+                    var trigger = picker.querySelector('.byted-popper-trigger');
+                    if (trigger) { trigger.click(); return 'clicked trigger'; }
+                    var input = picker.querySelector('input.byted-input');
+                    if (input) { input.click(); return 'clicked input'; }
+                    return 'no clickable element found';
+                })()
+            """)
+            logger.info(f"    打开日期选择器: {result}")
+            break
+        except Exception as e:
+            if attempt < 2:
+                logger.warning(f"    日期选择器操作失败(重试 {attempt + 1}/3): {e}")
+                time.sleep(3)
+            else:
+                raise
+    time.sleep(1)
+
+    try:
+        page.wait_for_selector('.byted-date-container', timeout=5000)
+    except Exception:
+        logger.warning("  日期弹窗未出现，尝试再次点击...")
+        page.evaluate("""
+            (function() {
+                var picker = document.querySelector('.byted-date-picker');
+                if (picker) picker.click();
+            })()
+        """)
+        time.sleep(1)
+        try:
+            page.wait_for_selector('.byted-date-container', timeout=5000)
+        except Exception:
+            logger.error("  日期弹窗仍未出现，跳过日期设置")
+            return
+
+    days_diff = (datetime.now().date() - target.date()).days
+    if days_diff == 0:
+        page.locator('.byted-date-panel-preset-item a', has_text='今天').click()
+        logger.info(f"  使用预设「今天」")
+        time.sleep(1)
+        return
+    if days_diff == 1:
+        page.locator('.byted-date-panel-preset-item a', has_text='昨天').click()
+        logger.info(f"  使用预设「昨天」")
+        time.sleep(1)
+        return
+
+    current = page.evaluate("""
+        (function() {
+            var views = document.querySelectorAll('.byted-date-view');
+            var r = {};
+            for (var i = 0; i < views.length; i++) {
+                var titles = views[i].querySelectorAll('.byted-date-title-item');
+                if (titles.length < 2) continue;
+                var y = parseInt(titles[0].textContent), m = parseInt(titles[1].textContent);
+                if (views[i].classList.contains('byted-date-position-start')) {
+                    r.sy = y; r.sm = m;
+                } else if (views[i].classList.contains('byted-date-position-end')) {
+                    r.ey = y; r.em = m;
+                }
+            }
+            return r;
+        })()
+    """)
+    logger.info(f"    当前日历面板: {current}")
+
+    if not current or 'sy' not in current:
+        logger.warning("  无法读取日历面板年月")
+        return
+
+    if current['sy'] == target_year and current['sm'] == target_month:
+        panel = '.byted-date-position-start'
+    elif current.get('ey') == target_year and current.get('em') == target_month:
+        panel = '.byted-date-position-end'
+    else:
+        months_diff = (current['sy'] - target_year) * 12 + (current['sm'] - target_month)
+        if months_diff > 0:
+            logger.info(f"  往前导航 {months_diff} 个月...")
+            for _ in range(months_diff):
+                page.locator('.byted-date-position-start .byted-icon-left-o').click()
+                time.sleep(0.5)
+        elif months_diff < 0:
+            logger.info(f"  往后导航 {-months_diff} 个月...")
+            for _ in range(-months_diff):
+                page.locator('.byted-date-position-end .byted-icon-right-o').click()
+                time.sleep(0.5)
+        time.sleep(0.5)
+        panel = '.byted-date-position-start'
+
+    selector = f"{panel} .byted-date-item:not(.byted-date-grid-prev):not(.byted-date-grid-next):not(.byted-date-disabled)"
+    for click_label in ("start", "end"):
+        items = page.locator(selector)
+        count = items.count()
+        clicked = False
+        for i in range(count):
+            item = items.nth(i)
+            if item.text_content().strip() == target_day:
+                item.click()
+                clicked = True
+                logger.info(f"    clicked {click_label}: day {target_day}")
+                break
+        if not clicked:
+            logger.warning(f"    {click_label}: day {target_day} not found in panel")
+        time.sleep(1)
+
+
+def douyin_select_store(page, store_config):
+    """在抖音每日收益页面选择门店（按省市筛选弹窗）。"""
+    store_short = store_config["store_short"]
+    search_keyword = store_config["search_keyword"]
+
+    logger.info(f"  → 选择门店: {store_short} (搜索: {search_keyword})...")
+
+    # 点击门店选择器（poi_dropdown 触发器）
+    result = page.evaluate("""
+        (function() {
+            var trigger = document.querySelector('.poi_dropdown_4a1a7');
+            if (trigger) { trigger.click(); return 'clicked poi_dropdown'; }
+            var container = document.querySelector('[class*="accountSelect"]');
+            if (!container) container = document.querySelector('[class*="indicators"]');
+            if (!container) return 'container not found';
+            var detail = container.querySelector('[class*="detail-indicator"]');
+            if (detail) { detail.click(); return 'clicked detail-indicator'; }
+            var triggers = container.querySelectorAll('.byted-dropdown-trigger');
+            if (triggers.length >= 2) { triggers[1].click(); return 'clicked trigger[1]'; }
+            return 'trigger not found';
+        })()
+    """)
+    logger.info(f"    打开门店选择器: {result}")
+    time.sleep(1)
+
+    try:
+        page.wait_for_selector('[class*="menu-container"]', timeout=5000)
+    except Exception:
+        logger.warning("    门店弹窗未出现")
+
+    # 先清除已有选项
+    result = page.evaluate("""
+        (function() {
+            var els = document.querySelectorAll('[class*="clean-btn"], [class*="clean"]');
+            for (var i = 0; i < els.length; i++) {
+                if (els[i].textContent.trim() === '清除') {
+                    els[i].click();
+                    return 'clicked';
+                }
+            }
+            var spans = document.querySelectorAll('span');
+            for (var i = 0; i < spans.length; i++) {
+                if (spans[i].textContent.trim() === '清除' && spans[i].children.length === 0) {
+                    spans[i].click();
+                    return 'clicked span';
+                }
+            }
+            return 'not found';
+        })()
+    """)
+    logger.info(f"    清除已有选项: {result}")
+    time.sleep(1)
+
+    # 搜索门店
+    result = page.evaluate("""
+        (function() {
+            var input = document.querySelector('input[placeholder*="门店"]');
+            if (!input) return 'search input not found';
+            var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 'value').set;
+            nativeInputValueSetter.call(input, '');
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            return 'cleared';
+        })()
+    """)
+    logger.info(f"    清空搜索框: {result}")
+    time.sleep(0.5)
+
+    result = page.evaluate(f"""
+        (function() {{
+            var input = document.querySelector('input[placeholder*="门店"]');
+            if (!input) return 'search input not found';
+            input.focus();
+            var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 'value').set;
+            nativeInputValueSetter.call(input, '{search_keyword}');
+            input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            return 'filled: {search_keyword}';
+        }})()
+    """)
+    logger.info(f"    搜索门店: {result}")
+    time.sleep(2)
+
+    # 选择第一个可用的门店 checkbox
+    result = page.evaluate("""
+        (function() {
+            var items = document.querySelectorAll('[class*="account-select-item-pc__warpper"], [class*="account-select-item"]');
+            for (var i = 0; i < items.length; i++) {
+                var cb = items[i].querySelector('.byted-checkbox');
+                if (!cb) continue;
+                if (cb.classList.contains('byted-checkbox-disabled')) continue;
+                var icon = cb.querySelector('.byted-checkbox-icon');
+                if (icon) { icon.click(); }
+                else { cb.click(); }
+                var nameEl = items[i].querySelector('span[style*="overflow"]');
+                return 'checked: ' + (nameEl ? nameEl.textContent.trim() : 'unknown');
+            }
+            // 如果都是disabled，尝试强制点击第一个
+            for (var i = 0; i < items.length; i++) {
+                var cb = items[i].querySelector('.byted-checkbox');
+                if (!cb) continue;
+                var input = cb.querySelector('input[type="checkbox"]');
+                if (input) {
+                    input.disabled = false;
+                    input.click();
+                    var nameEl = items[i].querySelector('span[style*="overflow"]');
+                    return 'force-checked: ' + (nameEl ? nameEl.textContent.trim() : 'unknown');
+                }
+            }
+            return 'no checkbox found';
+        })()
+    """)
+    logger.info(f"    选择门店: {result}")
+    time.sleep(1)
+
+    # 点击确认
+    result = page.evaluate("""
+        (function() {
+            var footer = document.querySelector('.account-select-footer-pc');
+            if (footer) {
+                var btns = footer.querySelectorAll('button');
+                for (var i = 0; i < btns.length; i++) {
+                    if (btns[i].textContent.trim() === '确认') {
+                        btns[i].click();
+                        return 'clicked';
+                    }
+                }
+            }
+            var btns = document.querySelectorAll('button.byted-btn-type-primary');
+            for (var i = 0; i < btns.length; i++) {
+                if (btns[i].textContent.trim() === '确认') {
+                    btns[i].click();
+                    return 'clicked fallback';
+                }
+            }
+            return 'not found';
+        })()
+    """)
+    logger.info(f"    确认: {result}")
+    time.sleep(3)
+
+
+def scrape_douyin_daily_benefits(page):
+    """从抖音每日收益页面抓取订单实收和佣金/服务费支出。"""
+    data = page.evaluate("""
+        (function() {
+            var result = {};
+            var containers = document.querySelectorAll('[class*="container--"]');
+            for (var i = 0; i < containers.length; i++) {
+                var textEl = containers[i].querySelector('[class*="text--"]');
+                var numEl = containers[i].querySelector('[class*="number--"]');
+                if (!textEl || !numEl) continue;
+                var label = textEl.textContent.trim();
+                var value = parseFloat(numEl.textContent.trim().replace(/,/g, '')) || 0;
+                if (label === '订单实收' || label === '佣金/服务费支出') {
+                    result[label] = value;
+                }
+            }
+            return result;
+        })()
+    """)
+    if not data:
+        logger.warning("  未抓取到抖音数据，可能页面未加载完成")
+    else:
+        logger.info(f"  抓取到抖音数据: {json.dumps(data, ensure_ascii=False)}")
+    return data
+
+
+def save_douyin_daily_benefits_csv(data, store_short, date_label, output_dir):
+    """将抖音每日收益数据保存为CSV。"""
+    csv_file = output_dir / f"抖音每日收益_{store_short}_{date_label}.csv"
+    with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(["项目", "金额"])
+        for key in DOUYIN_CSV_FIELDS:
+            writer.writerow([key, data.get(key, 0)])
+    logger.info(f"  已保存CSV: {csv_file.name}")
+    return csv_file
 
 
 def main():
@@ -1648,6 +2040,80 @@ def main():
 
             logger.info(f"{'=' * 55}")
             logger.info(f"  招行每日汇总下载完成！")
+            logger.info(f"{'=' * 55}\n")
+
+            # ── Part 3.7：抖音每日收益 ─────────────────────────────
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  Part 3.7：下载抖音每日收益")
+            logger.info(f"{'─' * 55}")
+
+            logger.info(f"  启动 Chrome (port=9226, profile=C:\\ChromeDebug_MTJYB)...")
+            dy_chrome_process = subprocess.Popen([
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                *(["--headless=new"] if args.headless else []),
+                "--remote-debugging-port=9226",
+                r"--user-data-dir=C:\ChromeDebug_MTJYB",
+            ])
+            time.sleep(5)
+
+            dy_browser = None
+            dy_page = None
+            try:
+                logger.info("  连接到 Chrome...")
+                dy_browser = pw.chromium.connect_over_cdp("http://localhost:9226")
+                dy_context = dy_browser.contexts[0]
+                dy_page = dy_context.new_page()
+                dy_page.set_default_timeout(120000)
+                dy_page.set_default_navigation_timeout(120000)
+
+                # douyin_login(dy_page)  # 暂时注释：使用已登录的 Chrome profile，无需登录
+
+                logger.info("  [导航] 前往抖音每日收益页面...")
+                dy_page.goto(DOUYIN_DAILY_BENEFITS_URL)
+                dy_page.wait_for_selector('.byted-date-picker', timeout=30000)
+                time.sleep(2)
+
+                douyin_set_date(dy_page, target)
+
+                for dy_idx, dy_config in enumerate(DOUYIN_STORE_CONFIG):
+                    dy_store_short = dy_config["store_short"]
+                    logger.info(f"{'─' * 40}")
+                    logger.info(f"  抖音门店 {dy_idx + 1}/{len(DOUYIN_STORE_CONFIG)}: {dy_store_short}")
+                    logger.info(f"{'─' * 40}")
+
+                    douyin_select_store(dy_page, dy_config)
+                    time.sleep(3)
+
+                    dy_data = scrape_douyin_daily_benefits(dy_page)
+                    save_douyin_daily_benefits_csv(dy_data, dy_store_short, date_label, output_dir)
+
+            except Exception as e:
+                logger.error(f"抖音每日收益下载失败: {e}")
+                if dy_page:
+                    try:
+                        screenshot = OUTPUT_DIR / "douyin_error.png"
+                        dy_page.screenshot(path=str(screenshot))
+                        logger.info(f"  错误截图已保存: {screenshot}")
+                    except Exception:
+                        pass
+            finally:
+                if dy_page:
+                    try:
+                        dy_page.close()
+                    except Exception:
+                        pass
+                if dy_browser:
+                    try:
+                        dy_browser.close()
+                    except Exception:
+                        pass
+                try:
+                    dy_chrome_process.terminate()
+                except Exception:
+                    pass
+
+            logger.info(f"{'=' * 55}")
+            logger.info(f"  抖音每日收益下载完成！")
             logger.info(f"{'=' * 55}\n")
 
             # ── Part 4：格式化数据并写入月度统计表 ──────────────────────────
