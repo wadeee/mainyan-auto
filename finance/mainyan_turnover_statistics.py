@@ -85,17 +85,7 @@ ZHAOHANG_STORE_CONFIG = [
         "store_short": "宝泰店",
         "store_value": "002009212000001",
         "store_label": "MAINYAN麦安研(东方宝泰店)",
-    },
-    {
-        "store_short": "龙江店",
-        "store_value": "002009212000003",
-        "store_label": "MAINYAN麦安研(番禺万达店)",
-    },
-    {
-        "store_short": "杏坛店",
-        "store_value": "002009212000002",
-        "store_label": "MAIANYAN麦安研(大悦汇店)",
-    },
+    }
 ]
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "麦安研营业统计"
