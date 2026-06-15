@@ -6,4 +6,5 @@ start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" ^
     --new-window ^
     "https://ecom.meituan.com/meishi" ^
     "https://ym.o2o.cmbchina.com/mc/merchant/handms/login.html" ^
-    "https://life.douyin.com/p/login"
+    "https://life.douyin.com/p/login" ^
+    "https://e.koubei.com"
