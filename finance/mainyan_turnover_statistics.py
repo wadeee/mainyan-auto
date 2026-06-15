@@ -52,14 +52,34 @@ ACCOUNT = "huomimayzb"
 WORKER_ID = "M008"
 PASSWORD = "Maianyan88"
 
+# 银豹系统
 LOGIN_URL = "https://beta69.pospal.cn/"
 BUSINESS_SUMMARY_URL = "https://beta69.pospal.cn/Report/BusinessSummaryV2"
 UNIONPAY_BILL_URL = "https://cloudapp-pay69.pospal.cn/#/additional/fund-summary?oem=0"
 CUSTOMER_SUMMARY_URL = "https://beta69.pospal.cn/CustomerReport/CustomerConsumerSummary"
+
+# 美团外卖
+# https://e.waimai.meituan.com
+# 美团外卖结算账单页
+MEITUAN_DOWNLOAD_URL_PRE = "https://e.waimai.meituan.com/#https://waimaieapp.meituan.com/finance/pc/settleBill"
+# 美团外卖账单
 MEITUAN_DOWNLOAD_URL = "https://waimaieapp.meituan.com/finance/static/gray_html_pc/billReconciliation.html#/daily-bill"
+# 美团推广消费
 MEITUAN_AD_URL = "https://waimaieapp.meituan.com/ad/v1/pc#/account"
+
+# 美团经营宝
+# https://ecom.meituan.com/meishi
+# 美团团购每日收益
 MEITUAN_JYB_URL = "https://ecom.meituan.com/finance-kdb/profit/home"
+
+# 饿了么/淘宝闪购
+# https://melody.shop.ele.me
+# 饿了么账单
 ELEME_BILL_URL = "https://napos-bill-pc.faas.ele.me/napos-bill-pc/v2/bill-checking?shopType=SINGLE"
+
+# 招行后台
+# https://ym.o2o.cmbchina.com/mc/merchant/handms/login.html
+# 招行每日汇总
 ZHAOHANG_URL = "https://ym.o2o.cmbchina.com/mc/merchant/handms/dailySummary.html"
 
 MEITUAN_STORE_CONFIG = [
@@ -1563,7 +1583,7 @@ def main():
                     chrome_page.set_default_navigation_timeout(120000)
 
                     logger.info("  [导航] 先进入美团外卖结算账单页...")
-                    chrome_page.goto("https://e.waimai.meituan.com/#https://waimaieapp.meituan.com/finance/pc/settleBill")
+                    chrome_page.goto(MEITUAN_DOWNLOAD_URL_PRE)
                     chrome_page.wait_for_load_state("networkidle", timeout=120_000)
                     time.sleep(5)
 
