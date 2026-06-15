@@ -1628,56 +1628,71 @@ def main():
                     chrome_page.wait_for_load_state("networkidle", timeout=120_000)
                     time.sleep(3)
 
-                    ad_search_js = f"""
-                        (function() {{
-                            var rows = document.querySelectorAll('.panel-body table tbody tr');
-                            for (var i = 0; i < rows.length; i++) {{
-                                var tds = rows[i].querySelectorAll('td');
-                                if (tds.length < 4) continue;
-                                if (tds[0].textContent.trim().indexOf('{date_label}') !== 0) continue;
-                                var amountSpan = tds[2].querySelector('span');
-                                var amountText = amountSpan ? amountSpan.textContent.trim() : tds[2].textContent.trim();
-                                var amount = parseFloat(amountText.replace(/,/g, '')) || 0;
-                                var balance = parseFloat(tds[3].textContent.trim().replace(/,/g, '')) || 0;
-                                return {{ found: true, amount: amount, balance: balance }};
-                            }}
-                            return {{ found: false }};
-                        }})()
-                    """
+                    logger.info(f"  → 逐页查找 {date_label} 的推广消费数据...")
+                    ad_found_total = 0
+                    ad_found = False
 
-                    logger.info(f"  → 查找 {date_label} 的推广消费数据...")
-                    ad_data = chrome_page.evaluate(ad_search_js)
-
-                    if not ad_data.get("found"):
-                        days_diff = (datetime.now().date() - target.date()).days
-                        if days_diff > 10:
-                            target_page = 2 + (days_diff - 11) // 10
-                            logger.info(f"  目标日期不在第1页，跳转到第 {target_page} 页...")
+                    for ad_page_num in range(1, 100):
+                        if ad_page_num > 1:
+                            logger.info(f"  翻到第 {ad_page_num} 页...")
                             chrome_page.evaluate(f"""
                                 (function() {{
                                     var input = document.querySelector('.jump input.form-control');
                                     var nativeSet = Object.getOwnPropertyDescriptor(
                                         HTMLInputElement.prototype, 'value').set;
-                                    nativeSet.call(input, '{target_page}');
+                                    nativeSet.call(input, '{ad_page_num}');
                                     input.dispatchEvent(new Event('input', {{bubbles: true}}));
                                     input.dispatchEvent(new Event('change', {{bubbles: true}}));
                                     document.querySelector('.jump button.btn').click();
                                 }})()
                             """)
                             time.sleep(3)
-                            ad_data = chrome_page.evaluate(ad_search_js)
 
-                    if ad_data.get("found"):
-                        logger.info(f"  推广消费数据: 变化金额={ad_data['amount']}, 余额={ad_data['balance']}")
+                        page_rows = chrome_page.evaluate("""
+                            (function() {
+                                var rows = document.querySelectorAll('.panel-body table tbody tr');
+                                var items = [];
+                                for (var i = 0; i < rows.length; i++) {
+                                    var tds = rows[i].querySelectorAll('td');
+                                    if (tds.length < 4) continue;
+                                    var amountSpan = tds[2].querySelector('span');
+                                    items.push({
+                                        date: tds[0].textContent.trim().substring(0, 10),
+                                        type: tds[1].textContent.trim(),
+                                        amount: (amountSpan ? amountSpan.textContent.trim() : tds[2].textContent.trim())
+                                    });
+                                }
+                                return items;
+                            })()
+                        """)
+
+                        if not page_rows:
+                            logger.info(f"  第 {ad_page_num} 页无数据，停止搜索")
+                            break
+
+                        passed_target = False
+                        for row in page_rows:
+                            if row["date"] == date_label and "推广消费" in row["type"]:
+                                amount = float(row["amount"].replace(",", "")) if row["amount"] else 0
+                                ad_found_total += amount
+                                ad_found = True
+                                logger.info(f"  第 {ad_page_num} 页命中: {row['type']}, 金额={amount}")
+                            if row["date"] < date_label:
+                                passed_target = True
+
+                        if passed_target:
+                            break
+
+                    if ad_found:
+                        logger.info(f"  推广消费数据: 变化金额={ad_found_total}")
                         ad_csv_file = output_dir / f"美团外卖推广消费_{mt_store_short}_{date_label}.csv"
                         with open(ad_csv_file, "w", newline="", encoding="utf-8-sig") as f:
                             writer = csv.writer(f)
                             writer.writerow(["项目", "金额"])
-                            writer.writerow(["变化金额", ad_data["amount"]])
-                            writer.writerow(["余额", ad_data["balance"]])
+                            writer.writerow(["变化金额", ad_found_total])
                         logger.info(f"  已保存推广消费CSV: {ad_csv_file}")
                     else:
-                        logger.warning(f"  未找到 {date_label} 的推广消费数据")
+                        logger.warning(f"  未找到 {date_label} 的推广消费数据（该日可能无推广消费）")
 
                     # ── 饿了么账单 ──────────────────────────────
                     if mt_store_short in ELEME_STORE_CONFIG:
