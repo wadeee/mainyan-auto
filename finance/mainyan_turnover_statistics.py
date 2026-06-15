@@ -23,10 +23,9 @@ import re
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
-
-from setuptools.command.egg_info import warn_depends_obsolete
 
 # ─── 日志配置 ───────────────────────────────────────────────────────────────────
 LOG_DIR = Path(__file__).resolve().parent / "log"
@@ -1543,28 +1542,50 @@ def save_koubei_bill_csv(data, store_short, date_label, output_dir):
     return csv_file
 
 
-def main():
-    parser = argparse.ArgumentParser(description="麦安研营业统计自动化脚本")
-    parser.add_argument("--days", type=int, default=0, help="日期偏移量：0=今天，-1=昨天（默认0）")
-    parser.add_argument("--date", type=str, help="指定目标日期，格式 YYYY.MM.DD")
-    parser.add_argument("--headless", action="store_true", help="无头模式（不显示浏览器窗口）")
-    args = parser.parse_args()
+def _launch_chrome(port, user_data_dir, headless=False):
+    process = subprocess.Popen([
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        *(["--headless=new"] if headless else []),
+        f"--remote-debugging-port={port}",
+        f"--user-data-dir={user_data_dir}",
+    ])
+    time.sleep(5)
+    return process
 
-    target = get_target_date(days=args.days, date_str=args.date)
-    target_str = target.strftime("%Y.%m.%d")
-    date_label = target.strftime("%Y-%m-%d")
 
-    logger.info(f"{'=' * 55}")
-    logger.info(f"  麦安研营业统计")
-    logger.info(f"  目标日期：{target_str}")
-    logger.info(f"  输出根目录：{OUTPUT_DIR}")
-    logger.info(f"{'=' * 55}")
+def _connect_cdp(pw, port):
+    browser = pw.chromium.connect_over_cdp(f"http://localhost:{port}")
+    context = browser.contexts[0]
+    page = context.new_page()
+    page.set_default_timeout(120000)
+    page.set_default_navigation_timeout(120000)
+    return browser, page
 
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        logger.error("未安装 playwright，请先运行: pip install playwright && playwright install chromium")
-        sys.exit(1)
+
+def _cleanup_chrome(page, browser, process):
+    if page:
+        try:
+            page.close()
+        except Exception:
+            pass
+    if browser:
+        try:
+            browser.close()
+        except Exception:
+            pass
+    if process:
+        try:
+            process.terminate()
+        except Exception:
+            pass
+
+
+# ─── Group A: 银豹系统（Playwright 浏览器）──────────────────────────────────────
+
+
+def run_pospal_tasks(args, target, target_str, date_label, output_dir):
+    TAG = "[银豹]"
+    from playwright.sync_api import sync_playwright
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(
@@ -1582,74 +1603,55 @@ def main():
         try:
             login(page)
 
-            output_dir = OUTPUT_DIR / "原始下载" / date_label
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            logger.info(f"{'─' * 55}")
-            logger.info(f"  下载营业概况日度统计")
-            logger.info(f"{'─' * 55}")
+            # ── 营业概况 ─────────────────────────────
+            logger.info(f"{TAG} {'─' * 45}")
+            logger.info(f"{TAG}  下载营业概况日度统计")
+            logger.info(f"{TAG} {'─' * 45}")
 
             for i, store in enumerate(STORES):
-                logger.info(f"{'─' * 40}")
-                logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['short']} ({store['full']})")
-                logger.info(f"{'─' * 40}")
+                logger.info(f"{TAG}  门店 {i + 1}/{len(STORES)}: {store['short']}")
 
-                logger.info("  [导航] 前往营业概况页面...")
                 page.goto(BUSINESS_SUMMARY_URL)
                 page.wait_for_load_state("networkidle", timeout=120_000)
-                logger.info(f"  已到达 → {page.url}")
 
                 select_store(page, store["full"])
 
-                logger.info(f"  → 设置日期: {target_str}...")
                 set_date(page, "开始日期", f"{target_str} 00:00")
                 set_date(page, "结束日期", f"{target_str} 23:59")
 
-                logger.info("  [查询] 执行查询...")
                 click_by_text(page, "查询", "查询")
                 page.wait_for_load_state("networkidle", timeout=150_000)
                 time.sleep(3)
 
-                logger.info("  [导出] 导出文件...")
                 with page.expect_download(timeout=180_000) as dl_info:
                     click_export(page)
 
                 download = dl_info.value
-                logger.info(f"  下载文件名: {download.suggested_filename}")
-
                 dest = output_dir / f"营业概况_{store['short']}_{date_label}.xlsx"
                 download.save_as(dest)
-                logger.info(f"  已保存到: {dest}")
+                logger.info(f"{TAG}  已保存: {dest.name}")
 
-            logger.info(f"{'=' * 55}")
-            logger.info(f"  营业概况下载全部完成！")
-            logger.info(f"  输出目录: {output_dir}")
-            logger.info(f"{'=' * 55}\n")
+            logger.info(f"{TAG}  营业概况下载全部完成！")
 
-            # ── Part 1.5：下载银豹付交易账单 ─────────────────────────────
-            logger.info(f"{'─' * 55}")
-            logger.info(f"  下载银豹付交易账单")
-            logger.info(f"{'─' * 55}")
+            # ── 银豹付交易账单 ─────────────────────────────
+            logger.info(f"{TAG} {'─' * 45}")
+            logger.info(f"{TAG}  下载银豹付交易账单")
+            logger.info(f"{TAG} {'─' * 45}")
 
             for i, up_config in enumerate(UNIONPAY_STORE_CONFIG):
                 store_short = up_config["store_short"]
-                logger.info(f"{'─' * 40}")
-                logger.info(f"  门店 {i + 1}/{len(UNIONPAY_STORE_CONFIG)}: {store_short}")
-                logger.info(f"{'─' * 40}")
+                logger.info(f"{TAG}  门店 {i + 1}/{len(UNIONPAY_STORE_CONFIG)}: {store_short}")
 
-                logger.info("  [导航] 前往银豹付交易账单页面...")
                 page.goto(UNIONPAY_BILL_URL)
                 page.wait_for_load_state("networkidle", timeout=120_000)
                 time.sleep(2)
 
-                logger.info(f"  → 设置日期: {target_str}...")
                 set_vue_date(page, target_str)
                 time.sleep(1)
 
                 select_unionpay_store(page, up_config)
                 time.sleep(0.5)
 
-                logger.info("  [搜索] 点击搜索...")
                 click_by_text(page, "搜索", "搜索")
                 page.wait_for_load_state("networkidle", timeout=150_000)
                 time.sleep(3)
@@ -1657,33 +1659,25 @@ def main():
                 bill_data = scrape_unionpay_bill(page)
                 save_unionpay_bill_csv(bill_data, store_short, date_label, output_dir)
 
-            logger.info(f"{'=' * 55}")
-            logger.info(f"  银豹付交易账单下载全部完成！")
-            logger.info(f"  输出目录: {output_dir}")
-            logger.info(f"{'=' * 55}\n")
+            logger.info(f"{TAG}  银豹付交易账单下载全部完成！")
 
-            # ── Part 1.6：下载会员消费汇总表 ─────────────────────────────
-            logger.info(f"{'─' * 55}")
-            logger.info(f"  下载会员消费汇总表")
-            logger.info(f"{'─' * 55}")
+            # ── 会员消费汇总表 ─────────────────────────────
+            logger.info(f"{TAG} {'─' * 45}")
+            logger.info(f"{TAG}  下载会员消费汇总表")
+            logger.info(f"{TAG} {'─' * 45}")
 
             for i, cs_config in enumerate(CUSTOMER_SUMMARY_STORE_CONFIG):
                 store_short = cs_config["store_short"]
-                logger.info(f"{'─' * 40}")
-                logger.info(f"  门店 {i + 1}/{len(CUSTOMER_SUMMARY_STORE_CONFIG)}: {store_short}")
-                logger.info(f"{'─' * 40}")
+                logger.info(f"{TAG}  门店 {i + 1}/{len(CUSTOMER_SUMMARY_STORE_CONFIG)}: {store_short}")
 
-                logger.info("  [导航] 前往会员消费汇总表页面...")
                 page.goto(CUSTOMER_SUMMARY_URL)
                 page.wait_for_load_state("networkidle", timeout=120_000)
                 time.sleep(2)
 
                 select_store_type_consumption(page)
-
                 select_stores_multi(page, cs_config["select_items"])
 
                 date_dash = target_str.replace(".", "-")
-                logger.info(f"  → 设置统计时间: {date_dash}...")
                 result = page.evaluate(f"""
                     (function() {{
                         function setVal(id, val) {{
@@ -1705,754 +1699,650 @@ def main():
                         return 'start=' + r1 + ', end=' + r2;
                     }})()
                 """)
-                logger.info(f"  统计时间: {result}")
+                logger.info(f"{TAG}  统计时间: {result}")
 
-                logger.info("  [查询] 执行查询...")
                 page.locator("#btnSearch").click()
                 page.wait_for_load_state("networkidle", timeout=150_000)
                 time.sleep(3)
 
-                logger.info("  [导出] 点击导出销售单据...")
                 click_by_text(page, "导出销售单据", "导出销售单据")
                 time.sleep(2)
 
-                logger.info("  [导出] 点击弹窗中的导出...")
                 with page.expect_download(timeout=180_000) as dl_info:
                     click_by_text(page, "导出", "弹窗导出")
 
                 download = dl_info.value
-                logger.info(f"  下载文件名: {download.suggested_filename}")
-
                 dest = output_dir / f"会员消费汇总表_{store_short}_{date_label}.xlsx"
                 download.save_as(dest)
-                logger.info(f"  已保存到: {dest}")
+                logger.info(f"{TAG}  已保存: {dest.name}")
 
-            logger.info(f"{'=' * 55}")
-            logger.info(f"  会员消费汇总表下载全部完成！")
-            logger.info(f"  输出目录: {output_dir}")
-            logger.info(f"{'=' * 55}\n")
+            logger.info(f"{TAG}  会员消费汇总表下载全部完成！")
 
-            # ── Part 3：下载美团外卖账单明细 ─────────────────────────────
-            logger.info(f"{'─' * 55}")
-            logger.info(f"  Part 3：下载美团外卖账单明细")
-            logger.info(f"{'─' * 55}")
+        finally:
+            context.close()
+            browser.close()
 
-            for mt_idx, mt_config in enumerate(MEITUAN_STORE_CONFIG):
-                mt_store_short = mt_config["store_short"]
-                mt_port = mt_config["port"]
-                mt_user_data_dir = mt_config["user_data_dir"]
 
-                logger.info(f"{'─' * 40}")
-                logger.info(f"  美团门店 {mt_idx + 1}/{len(MEITUAN_STORE_CONFIG)}: {mt_store_short}")
-                logger.info(f"{'─' * 40}")
+# ─── Group B: 美团外卖（每店独立 Chrome）──────────────────────────────────────
 
-                logger.info(f"  启动 Chrome (port={mt_port}, profile={mt_user_data_dir})...")
-                chrome_process = subprocess.Popen([
-                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                    *(["--headless=new"] if args.headless else []),
-                    f"--remote-debugging-port={mt_port}",
-                    f"--user-data-dir={mt_user_data_dir}",
-                ])
-                time.sleep(5)
 
-                chrome_browser = None
-                chrome_page = None
-                try:
-                    logger.info("  连接到 Chrome...")
-                    chrome_browser = pw.chromium.connect_over_cdp(f"http://localhost:{mt_port}")
-                    chrome_context = chrome_browser.contexts[0]
-                    chrome_page = chrome_context.new_page()
-                    chrome_page.set_default_timeout(120000)
-                    chrome_page.set_default_navigation_timeout(120000)
+def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_dir):
+    mt_store_short = mt_config["store_short"]
+    mt_port = mt_config["port"]
+    mt_user_data_dir = mt_config["user_data_dir"]
+    TAG = f"[美团外卖-{mt_store_short}]"
 
-                    logger.info("  [导航] 先进入美团外卖结算账单页...")
-                    chrome_page.goto(MEITUAN_DOWNLOAD_URL_PRE)
-                    chrome_page.wait_for_load_state("networkidle", timeout=120_000)
-                    time.sleep(5)
+    from playwright.sync_api import sync_playwright
 
-                    logger.info("  [导航] 前往美团外卖账单明细页...")
-                    chrome_page.goto(MEITUAN_DOWNLOAD_URL)
-                    chrome_page.wait_for_load_state("networkidle", timeout=120_000)
-                    time.sleep(3)
+    chrome_process = _launch_chrome(mt_port, mt_user_data_dir, args.headless)
+    chrome_browser = None
+    chrome_page = None
 
-                    # 设置日期
-                    date_input_value = f"{date_label} 日账单"
-                    logger.info(f"  → 设置日期: {date_input_value}...")
-                    date_input = chrome_page.locator(".select-input-wrapper .roo-input")
-                    date_input.click()
-                    time.sleep(0.5)
-                    date_input.press("Control+a")
-                    date_input.type(date_input_value, delay=50)
-                    date_input.press("Enter")
-                    time.sleep(0.5)
-                    chrome_page.locator("body").click(position={"x": 0, "y": 0})
-                    logger.info(f"  已设置日期: {date_input_value}")
+    with sync_playwright() as pw:
+        try:
+            logger.info(f"{TAG}  连接到 Chrome (port={mt_port})...")
+            chrome_browser, chrome_page = _connect_cdp(pw, mt_port)
 
-                    # 等待数据刷新
-                    logger.info("  等待数据刷新...")
-                    time.sleep(5)
-
-                    # 从 tfoot 总计行抓取数据
-                    logger.info("  → 抓取账单数据...")
-                    bill_data = chrome_page.evaluate("""
-                        (function() {
-                            var result = {};
-                            var tfoot = document.querySelector('.bill-charge-table tfoot tr');
-                            if (tfoot) {
-                                var tds = tfoot.querySelectorAll('td');
-                                result['商品总价'] = parseFloat(tds[1].textContent.trim().replace(/,/g, '')) || 0;
-                                result['打包费'] = parseFloat(tds[2].textContent.trim().replace(/,/g, '')) || 0;
-                                result['商家对顾客的活动补贴'] = parseFloat(tds[3].textContent.trim().replace(/,/g, '')) || 0;
-                                result['佣金'] = parseFloat(tds[6].textContent.trim().replace(/,/g, '')) || 0;
-                                result['配送服务费'] = parseFloat(tds[7].textContent.trim().replace(/,/g, '')) || 0;
-                            }
-                            var tabs = document.querySelectorAll('.roo-tabs-nav .tab-item a');
-                            for (var i = 0; i < tabs.length; i++) {
-                                var text = tabs[i].textContent.trim();
-                                if (text.indexOf('其它类') >= 0 || text.indexOf('其他类') >= 0) {
-                                    var match = text.match(/([-\\d.]+)\\s*$/);
-                                    result['其他类'] = match ? parseFloat(match[1]) : 0;
-                                    break;
-                                }
-                            }
-                            return result;
-                        })()
-                    """)
-                    logger.info(f"  抓取数据: {json.dumps(bill_data, ensure_ascii=False)}")
-
-                    # 保存为 CSV
-                    meituan_csv_fields = ["商品总价", "打包费", "商家对顾客的活动补贴", "佣金", "配送服务费", "其他类"]
-                    csv_file = output_dir / f"账单明细_{mt_store_short}_{date_label}.csv"
-                    with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
-                        writer = csv.writer(f)
-                        writer.writerow(["项目", "金额"])
-                        for key in meituan_csv_fields:
-                            writer.writerow([key, bill_data.get(key, 0)])
-                    logger.info(f"  已保存CSV: {csv_file}")
-
-                    # ── 美团推广消费 ──────────────────────────────
-                    logger.info("  [导航] 前往美团推广账户详情页...")
-                    chrome_page.goto(MEITUAN_AD_URL)
-                    chrome_page.wait_for_load_state("networkidle", timeout=120_000)
-                    time.sleep(3)
-
-                    logger.info(f"  → 逐页查找 {date_label} 的推广消费数据...")
-                    ad_found_total = 0
-                    ad_found = False
-
-                    for ad_page_num in range(1, 100):
-                        if ad_page_num > 1:
-                            logger.info(f"  翻到第 {ad_page_num} 页...")
-                            chrome_page.evaluate(f"""
-                                (function() {{
-                                    var input = document.querySelector('.jump input.form-control');
-                                    var nativeSet = Object.getOwnPropertyDescriptor(
-                                        HTMLInputElement.prototype, 'value').set;
-                                    nativeSet.call(input, '{ad_page_num}');
-                                    input.dispatchEvent(new Event('input', {{bubbles: true}}));
-                                    input.dispatchEvent(new Event('change', {{bubbles: true}}));
-                                    document.querySelector('.jump button.btn').click();
-                                }})()
-                            """)
-                            time.sleep(3)
-
-                        page_rows = chrome_page.evaluate("""
-                            (function() {
-                                var rows = document.querySelectorAll('.panel-body table tbody tr');
-                                var items = [];
-                                for (var i = 0; i < rows.length; i++) {
-                                    var tds = rows[i].querySelectorAll('td');
-                                    if (tds.length < 4) continue;
-                                    var amountSpan = tds[2].querySelector('span');
-                                    items.push({
-                                        date: tds[0].textContent.trim().substring(0, 10),
-                                        type: tds[1].textContent.trim(),
-                                        amount: (amountSpan ? amountSpan.textContent.trim() : tds[2].textContent.trim())
-                                    });
-                                }
-                                return items;
-                            })()
-                        """)
-
-                        if not page_rows:
-                            logger.info(f"  第 {ad_page_num} 页无数据，停止搜索")
-                            break
-
-                        passed_target = False
-                        for row in page_rows:
-                            if row["date"] == date_label and "推广消费" in row["type"]:
-                                amount = float(row["amount"].replace(",", "")) if row["amount"] else 0
-                                ad_found_total += amount
-                                ad_found = True
-                                logger.info(f"  第 {ad_page_num} 页命中: {row['type']}, 金额={amount}")
-                            if row["date"] < date_label:
-                                passed_target = True
-
-                        if passed_target:
-                            break
-
-                    if ad_found:
-                        logger.info(f"  推广消费数据: 变化金额={ad_found_total}")
-                        ad_csv_file = output_dir / f"美团外卖推广消费_{mt_store_short}_{date_label}.csv"
-                        with open(ad_csv_file, "w", newline="", encoding="utf-8-sig") as f:
-                            writer = csv.writer(f)
-                            writer.writerow(["项目", "金额"])
-                            writer.writerow(["变化金额", ad_found_total])
-                        logger.info(f"  已保存推广消费CSV: {ad_csv_file}")
-                    else:
-                        logger.warning(f"  未找到 {date_label} 的推广消费数据（该日可能无推广消费）")
-
-                    # ── 饿了么账单 ──────────────────────────────
-                    if mt_store_short in ELEME_STORE_CONFIG:
-                        logger.info("  [导航] 前往饿了么账单页面...")
-                        chrome_page.goto(ELEME_BILL_URL)
-                        time.sleep(3)
-
-                        logger.info(f"  → 设置账单日期: {date_label}...")
-                        start_input = chrome_page.locator('input[placeholder="开始日期"]')
-                        start_input.click()
-                        time.sleep(0.5)
-                        start_input.press("Control+a")
-                        start_input.type(date_label, delay=50)
-                        time.sleep(0.3)
-
-                        end_input = chrome_page.locator('input[placeholder="结束日期"]')
-                        end_input.click()
-                        time.sleep(0.5)
-                        end_input.press("Control+a")
-                        end_input.type(date_label, delay=50)
-                        end_input.press("Enter")
-                        time.sleep(0.5)
-
-                        logger.info("  [查询] 点击查询...")
-                        chrome_page.locator("button.cook-btn-primary").click()
-                        time.sleep(3)
-
-                        logger.info("  → 抓取饿了么账单数据...")
-                        eleme_data = chrome_page.evaluate("""
-                            (function() {
-                                var result = {};
-                                var thead = document.querySelector('.ant-table-thead');
-                                if (!thead) return result;
-                                var rows = thead.querySelectorAll('tr');
-                                if (rows.length < 2) return result;
-                                var ths = rows[1].querySelectorAll('th');
-                                if (ths.length >= 4) {
-                                    result['结算金额'] = parseFloat(ths[1].textContent.trim().replace(/,/g, '')) || 0;
-                                    result['订单类'] = parseFloat(ths[2].textContent.trim().replace(/,/g, '')) || 0;
-                                    result['其他类'] = parseFloat(ths[3].textContent.trim().replace(/,/g, '')) || 0;
-                                }
-                                return result;
-                            })()
-                        """)
-                        logger.info(f"  抓取数据: {json.dumps(eleme_data, ensure_ascii=False)}")
-
-                        eleme_csv_fields = ["结算金额", "订单类", "其他类"]
-                        eleme_csv_file = output_dir / f"饿了么账单_{mt_store_short}_{date_label}.csv"
-                        with open(eleme_csv_file, "w", newline="", encoding="utf-8-sig") as f:
-                            writer = csv.writer(f)
-                            writer.writerow(["项目", "金额"])
-                            for key in eleme_csv_fields:
-                                writer.writerow([key, eleme_data.get(key, 0)])
-                        logger.info(f"  已保存CSV: {eleme_csv_file}")
-
-                except Exception as e:
-                    logger.error(f"美团外卖账单明细下载失败 ({mt_store_short}): {e}")
-                    if chrome_page:
-                        try:
-                            screenshot = OUTPUT_DIR / f"meituan_error_{mt_store_short}.png"
-                            chrome_page.screenshot(path=str(screenshot))
-                            logger.info(f"  错误截图已保存: {screenshot}")
-                        except Exception:
-                            pass
-                finally:
-                    if chrome_page:
-                        try:
-                            chrome_page.close()
-                        except Exception:
-                            pass
-                    if chrome_browser:
-                        try:
-                            chrome_browser.close()
-                        except Exception:
-                            pass
-                    try:
-                        chrome_process.terminate()
-                    except Exception:
-                        pass
-
-            logger.info(f"{'=' * 55}")
-            logger.info(f"  美团外卖账单明细下载全部完成！")
-            logger.info(f"{'=' * 55}\n")
-
-            # ── Part 3.5：美团经营宝每日收益 ─────────────────────────────
-            logger.info(f"{'─' * 55}")
-            logger.info(f"  Part 3.5：下载美团经营宝每日收益")
-            logger.info(f"{'─' * 55}")
-
-            logger.info(f"  启动 Chrome (port=9226, profile=C:\\ChromeDebug_MTJYB)...")
-            jyb_chrome_process = subprocess.Popen([
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                *(["--headless=new"] if args.headless else []),
-                "--remote-debugging-port=9226",
-                r"--user-data-dir=C:\ChromeDebug_MTJYB",
-            ])
+            logger.info(f"{TAG}  [导航] 先进入美团外卖结算账单页...")
+            chrome_page.goto(MEITUAN_DOWNLOAD_URL_PRE)
+            chrome_page.wait_for_load_state("networkidle", timeout=120_000)
             time.sleep(5)
 
-            jyb_browser = None
-            jyb_page = None
-            try:
-                logger.info("  连接到 Chrome...")
-                jyb_browser = pw.chromium.connect_over_cdp("http://localhost:9226")
-                jyb_context = jyb_browser.contexts[0]
-                jyb_page = jyb_context.new_page()
-                jyb_page.set_default_timeout(120000)
-                jyb_page.set_default_navigation_timeout(120000)
+            logger.info(f"{TAG}  [导航] 前往美团外卖账单明细页...")
+            chrome_page.goto(MEITUAN_DOWNLOAD_URL)
+            chrome_page.wait_for_load_state("networkidle", timeout=120_000)
+            time.sleep(3)
 
-                logger.info("  [导航] 前往美团经营宝每日收益页...")
-                jyb_page.goto(MEITUAN_JYB_URL)
-                jyb_page.wait_for_load_state("networkidle", timeout=120_000)
-                time.sleep(3)
+            date_input_value = f"{date_label} 日账单"
+            logger.info(f"{TAG}  → 设置日期: {date_input_value}...")
+            date_input = chrome_page.locator(".select-input-wrapper .roo-input")
+            date_input.click()
+            time.sleep(0.5)
+            date_input.press("Control+a")
+            date_input.type(date_input_value, delay=50)
+            date_input.press("Enter")
+            time.sleep(0.5)
+            chrome_page.locator("body").click(position={"x": 0, "y": 0})
 
-                # ── 设置收益时间 ──────────────────────────────
-                days_diff = (datetime.now().date() - target.date()).days
-                logger.info(f"  → 设置收益时间: {target.strftime('%Y/%m/%d')} (距今 {days_diff} 天)...")
+            logger.info(f"{TAG}  等待数据刷新...")
+            time.sleep(5)
 
-                if days_diff in (0, 1, 2):
-                    btn_map = {0: "今日", 1: "昨日", 2: "前日"}
-                    jyb_page.locator(f'button[value="{btn_map[days_diff]}"]').click()
-                    logger.info(f"  已点击快捷按钮: {btn_map[days_diff]}")
-                else:
-                    try:
-                        jyb_page.locator('.mtd-date-picker input').click()
-                        time.sleep(1)
+            logger.info(f"{TAG}  → 抓取账单数据...")
+            bill_data = chrome_page.evaluate("""
+                (function() {
+                    var result = {};
+                    var tfoot = document.querySelector('.bill-charge-table tfoot tr');
+                    if (tfoot) {
+                        var tds = tfoot.querySelectorAll('td');
+                        result['商品总价'] = parseFloat(tds[1].textContent.trim().replace(/,/g, '')) || 0;
+                        result['打包费'] = parseFloat(tds[2].textContent.trim().replace(/,/g, '')) || 0;
+                        result['商家对顾客的活动补贴'] = parseFloat(tds[3].textContent.trim().replace(/,/g, '')) || 0;
+                        result['佣金'] = parseFloat(tds[6].textContent.trim().replace(/,/g, '')) || 0;
+                        result['配送服务费'] = parseFloat(tds[7].textContent.trim().replace(/,/g, '')) || 0;
+                    }
+                    var tabs = document.querySelectorAll('.roo-tabs-nav .tab-item a');
+                    for (var i = 0; i < tabs.length; i++) {
+                        var text = tabs[i].textContent.trim();
+                        if (text.indexOf('其它类') >= 0 || text.indexOf('其他类') >= 0) {
+                            var match = text.match(/([-\\d.]+)\\s*$/);
+                            result['其他类'] = match ? parseFloat(match[1]) : 0;
+                            break;
+                        }
+                    }
+                    return result;
+                })()
+            """)
+            logger.info(f"{TAG}  抓取数据: {json.dumps(bill_data, ensure_ascii=False)}")
 
-                        # 读取左侧日历当前显示的年月
-                        current_info = jyb_page.evaluate("""
-                            (function() {
-                                var popup = document.querySelector('.mtd-singleRangePicker-pop');
-                                if (!popup) return null;
-                                var leftCal = popup.querySelector('.mtd-date-calendar');
-                                if (!leftCal) return null;
-                                var yearBtn = leftCal.querySelector('.mtd-date-calendar-year-btn');
-                                var monthBtn = leftCal.querySelector('.mtd-date-calendar-month-btn');
-                                if (!yearBtn || !monthBtn) return null;
-                                return { year: parseInt(yearBtn.textContent), month: parseInt(monthBtn.textContent) };
-                            })()
-                        """)
+            meituan_csv_fields = ["商品总价", "打包费", "商家对顾客的活动补贴", "佣金", "配送服务费", "其他类"]
+            csv_file = output_dir / f"账单明细_{mt_store_short}_{date_label}.csv"
+            with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.writer(f)
+                writer.writerow(["项目", "金额"])
+                for key in meituan_csv_fields:
+                    writer.writerow([key, bill_data.get(key, 0)])
+            logger.info(f"{TAG}  已保存CSV: {csv_file.name}")
 
-                        if not current_info:
-                            logger.warning("  日历面板未打开或无法读取年月")
-                        else:
-                            logger.info(f"  当前日历: {current_info['year']}年{current_info['month']}月")
-                            months_back = (current_info['year'] - target.year) * 12 + (current_info['month'] - target.month)
+            # ── 美团推广消费 ──────────────────────────────
+            logger.info(f"{TAG}  [导航] 前往美团推广账户详情页...")
+            chrome_page.goto(MEITUAN_AD_URL)
+            chrome_page.wait_for_load_state("networkidle", timeout=120_000)
+            time.sleep(3)
 
-                            if months_back > 0:
-                                logger.info(f"  往前导航 {months_back} 个月...")
-                                for _ in range(months_back):
-                                    jyb_page.locator(
-                                        '.mtd-singleRangePicker-pop .mtd-date-calendar:first-child '
-                                        '.mtd-date-calendar-month-switcher.left-switcher'
-                                    ).click()
-                                    time.sleep(0.3)
-                                time.sleep(0.5)
+            logger.info(f"{TAG}  → 逐页查找 {date_label} 的推广消费数据...")
+            ad_found_total = 0
+            ad_found = False
 
-                            target_day_str = str(target.day)
+            for ad_page_num in range(1, 100):
+                if ad_page_num > 1:
+                    logger.info(f"{TAG}  翻到第 {ad_page_num} 页...")
+                    chrome_page.evaluate(f"""
+                        (function() {{
+                            var input = document.querySelector('.jump input.form-control');
+                            var nativeSet = Object.getOwnPropertyDescriptor(
+                                HTMLInputElement.prototype, 'value').set;
+                            nativeSet.call(input, '{ad_page_num}');
+                            input.dispatchEvent(new Event('input', {{bubbles: true}}));
+                            input.dispatchEvent(new Event('change', {{bubbles: true}}));
+                            document.querySelector('.jump button.btn').click();
+                        }})()
+                    """)
+                    time.sleep(3)
 
-                            # 点击目标日（起始日期）
-                            start_result = jyb_page.evaluate(f"""
-                                (function() {{
-                                    var popup = document.querySelector('.mtd-singleRangePicker-pop');
-                                    if (!popup) return 'popup not found';
-                                    var leftCal = popup.querySelector('.mtd-date-calendar');
-                                    var activePanel = leftCal.querySelector('.mtd-date-calendar-content.active');
-                                    if (!activePanel) return 'no active panel';
-                                    var wrappers = activePanel.querySelectorAll('.mtd-date-panel-data-wrapper');
-                                    for (var j = 0; j < wrappers.length; j++) {{
-                                        if (wrappers[j].classList.contains('not-current-month')) continue;
-                                        if (wrappers[j].classList.contains('disabled-date')) continue;
-                                        var btn = wrappers[j].querySelector('.mtd-date-panel-data');
-                                        if (btn && btn.textContent.trim() === '{target_day_str}') {{
-                                            btn.click();
-                                            return 'clicked start: day ' + btn.textContent.trim();
-                                        }}
-                                    }}
-                                    return 'start day {target_day_str} not found';
-                                }})()
-                            """)
-                            logger.info(f"  {start_result}")
-                            time.sleep(0.5)
-
-                            # 再次点击同一天（结束日期 = 起始日期）
-                            end_result = jyb_page.evaluate(f"""
-                                (function() {{
-                                    var popup = document.querySelector('.mtd-singleRangePicker-pop');
-                                    if (!popup) return 'popup closed';
-                                    var leftCal = popup.querySelector('.mtd-date-calendar');
-                                    var activePanel = leftCal.querySelector('.mtd-date-calendar-content.active');
-                                    if (!activePanel) return 'no active panel';
-                                    var wrappers = activePanel.querySelectorAll('.mtd-date-panel-data-wrapper');
-                                    for (var j = 0; j < wrappers.length; j++) {{
-                                        if (wrappers[j].classList.contains('not-current-month')) continue;
-                                        var btn = wrappers[j].querySelector('.mtd-date-panel-data');
-                                        if (btn && btn.textContent.trim() === '{target_day_str}') {{
-                                            btn.click();
-                                            return 'clicked end: day ' + btn.textContent.trim();
-                                        }}
-                                    }}
-                                    return 'end day {target_day_str} not found';
-                                }})()
-                            """)
-                            logger.info(f"  {end_result}")
-
-                    except Exception as date_err:
-                        logger.warning(f"  日期选择器操作失败: {date_err}")
-                        try:
-                            jyb_page.screenshot(path=str(OUTPUT_DIR / "debug_datepicker.png"))
-                            logger.info(f"  已保存调试截图: {OUTPUT_DIR / 'debug_datepicker.png'}")
-                        except Exception:
-                            pass
-
-                logger.info("  等待数据刷新...")
-                time.sleep(3)
-
-                # ── 抓取所有门店数据（保持「3家门店」全选） ──────────────────
-                logger.info("  → 抓取经营宝收益数据...")
-                jyb_rows = jyb_page.evaluate("""
+                page_rows = chrome_page.evaluate("""
                     (function() {
-                        var rows = document.querySelectorAll('.mtd-table-body tbody tr');
-                        var result = [];
+                        var rows = document.querySelectorAll('.panel-body table tbody tr');
+                        var items = [];
                         for (var i = 0; i < rows.length; i++) {
                             var tds = rows[i].querySelectorAll('td');
-                            if (tds.length < 9) continue;
-                            var storeName = tds[0].textContent.trim();
-                            var priceDiv = tds[2].querySelector('div > div');
-                            var price = priceDiv
-                                ? parseFloat(priceDiv.textContent.trim().replace(/,/g, '')) || 0
-                                : parseFloat(tds[2].textContent.trim().replace(/,/g, '')) || 0;
-                            var promotion = parseFloat(tds[3].textContent.trim().replace(/,/g, '')) || 0;
-                            var service = parseFloat(tds[4].textContent.trim().replace(/,/g, '')) || 0;
-                            var other = parseFloat(tds[8].textContent.trim().replace(/,/g, '')) || 0;
-                            result.push({
-                                storeName: storeName,
-                                price: price,
-                                promotion: promotion,
-                                service: service,
-                                other: other
+                            if (tds.length < 4) continue;
+                            var amountSpan = tds[2].querySelector('span');
+                            items.push({
+                                date: tds[0].textContent.trim().substring(0, 10),
+                                type: tds[1].textContent.trim(),
+                                amount: (amountSpan ? amountSpan.textContent.trim() : tds[2].textContent.trim())
                             });
+                        }
+                        return items;
+                    })()
+                """)
+
+                if not page_rows:
+                    logger.info(f"{TAG}  第 {ad_page_num} 页无数据，停止搜索")
+                    break
+
+                passed_target = False
+                for row in page_rows:
+                    if row["date"] == date_label and "推广消费" in row["type"]:
+                        amount = float(row["amount"].replace(",", "")) if row["amount"] else 0
+                        ad_found_total += amount
+                        ad_found = True
+                        logger.info(f"{TAG}  第 {ad_page_num} 页命中: {row['type']}, 金额={amount}")
+                    if row["date"] < date_label:
+                        passed_target = True
+
+                if passed_target:
+                    break
+
+            if ad_found:
+                logger.info(f"{TAG}  推广消费数据: 变化金额={ad_found_total}")
+                ad_csv_file = output_dir / f"美团外卖推广消费_{mt_store_short}_{date_label}.csv"
+                with open(ad_csv_file, "w", newline="", encoding="utf-8-sig") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["项目", "金额"])
+                    writer.writerow(["变化金额", ad_found_total])
+                logger.info(f"{TAG}  已保存推广消费CSV: {ad_csv_file.name}")
+            else:
+                logger.warning(f"{TAG}  未找到 {date_label} 的推广消费数据（该日可能无推广消费）")
+
+            # ── 饿了么账单 ──────────────────────────────
+            if mt_store_short in ELEME_STORE_CONFIG:
+                logger.info(f"{TAG}  [导航] 前往饿了么账单页面...")
+                chrome_page.goto(ELEME_BILL_URL)
+                time.sleep(3)
+
+                logger.info(f"{TAG}  → 设置账单日期: {date_label}...")
+                start_input = chrome_page.locator('input[placeholder="开始日期"]')
+                start_input.click()
+                time.sleep(0.5)
+                start_input.press("Control+a")
+                start_input.type(date_label, delay=50)
+                time.sleep(0.3)
+
+                end_input = chrome_page.locator('input[placeholder="结束日期"]')
+                end_input.click()
+                time.sleep(0.5)
+                end_input.press("Control+a")
+                end_input.type(date_label, delay=50)
+                end_input.press("Enter")
+                time.sleep(0.5)
+
+                logger.info(f"{TAG}  [查询] 点击查询...")
+                chrome_page.locator("button.cook-btn-primary").click()
+                time.sleep(3)
+
+                logger.info(f"{TAG}  → 抓取饿了么账单数据...")
+                eleme_data = chrome_page.evaluate("""
+                    (function() {
+                        var result = {};
+                        var thead = document.querySelector('.ant-table-thead');
+                        if (!thead) return result;
+                        var rows = thead.querySelectorAll('tr');
+                        if (rows.length < 2) return result;
+                        var ths = rows[1].querySelectorAll('th');
+                        if (ths.length >= 4) {
+                            result['结算金额'] = parseFloat(ths[1].textContent.trim().replace(/,/g, '')) || 0;
+                            result['订单类'] = parseFloat(ths[2].textContent.trim().replace(/,/g, '')) || 0;
+                            result['其他类'] = parseFloat(ths[3].textContent.trim().replace(/,/g, '')) || 0;
                         }
                         return result;
                     })()
                 """)
-                logger.info(f"  抓取到 {len(jyb_rows)} 行数据")
+                logger.info(f"{TAG}  抓取数据: {json.dumps(eleme_data, ensure_ascii=False)}")
 
-                store_keywords = {"宝泰": "宝泰店", "龙江": "龙江店", "杏坛": "杏坛店"}
-                for row in jyb_rows:
-                    store_short = None
-                    for keyword, short in store_keywords.items():
-                        if keyword in row["storeName"]:
-                            store_short = short
-                            break
-                    if not store_short:
-                        logger.warning(f"  未匹配门店: {row['storeName']}")
-                        continue
-
-                    logger.info(f"  {store_short}: 售价={row['price']}, 促销费={row['promotion']}, "
-                                f"服务费={row['service']}, 其他费用={row['other']}")
-
-                    jyb_csv = output_dir / f"美团经营宝_每日收益_{store_short}_{date_label}.csv"
-                    with open(jyb_csv, "w", newline="", encoding="utf-8-sig") as f:
-                        writer = csv.writer(f)
-                        writer.writerow(["项目", "金额"])
-                        writer.writerow(["售价", row["price"]])
-                        writer.writerow(["促销费", row["promotion"]])
-                        writer.writerow(["服务费", row["service"]])
-                        writer.writerow(["其他费用", row["other"]])
-                    logger.info(f"  已保存CSV: {jyb_csv}")
-
-            except Exception as e:
-                logger.error(f"美团经营宝每日收益下载失败: {e}")
-                if jyb_page:
-                    try:
-                        screenshot = OUTPUT_DIR / "meituan_jyb_error.png"
-                        jyb_page.screenshot(path=str(screenshot))
-                        logger.info(f"  错误截图已保存: {screenshot}")
-                    except Exception:
-                        pass
-            finally:
-                if jyb_page:
-                    try:
-                        jyb_page.close()
-                    except Exception:
-                        pass
-                if jyb_browser:
-                    try:
-                        jyb_browser.close()
-                    except Exception:
-                        pass
-                try:
-                    jyb_chrome_process.terminate()
-                except Exception:
-                    pass
-
-            logger.info(f"{'=' * 55}")
-            logger.info(f"  美团经营宝每日收益下载完成！")
-            logger.info(f"{'=' * 55}\n")
-
-            # ── Part 3.6：招行每日汇总 ─────────────────────────────
-            logger.info(f"{'─' * 55}")
-            logger.info(f"  Part 3.6：下载招行每日汇总")
-            logger.info(f"{'─' * 55}")
-
-            logger.info(f"  启动 Chrome (port=9226, profile=C:\\ChromeDebug_MTJYB)...")
-            zh_chrome_process = subprocess.Popen([
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                *(["--headless=new"] if args.headless else []),
-                "--remote-debugging-port=9226",
-                r"--user-data-dir=C:\ChromeDebug_MTJYB",
-            ])
-            time.sleep(5)
-
-            zh_browser = None
-            zh_page = None
-            try:
-                logger.info("  连接到 Chrome...")
-                zh_browser = pw.chromium.connect_over_cdp("http://localhost:9226")
-                zh_context = zh_browser.contexts[0]
-                zh_page = zh_context.new_page()
-                zh_page.set_default_timeout(120000)
-                zh_page.set_default_navigation_timeout(120000)
-
-                for zh_idx, zh_config in enumerate(ZHAOHANG_STORE_CONFIG):
-                    zh_store_short = zh_config["store_short"]
-                    logger.info(f"{'─' * 40}")
-                    logger.info(f"  招行门店 {zh_idx + 1}/{len(ZHAOHANG_STORE_CONFIG)}: {zh_store_short}")
-                    logger.info(f"{'─' * 40}")
-
-                    logger.info("  [导航] 前往招行每日汇总页面...")
-                    zh_page.goto(ZHAOHANG_URL)
-                    zh_page.wait_for_load_state("networkidle", timeout=120_000)
-                    time.sleep(3)
-
-                    scrape_zhaohang_daily_summary(zh_page, target_str, date_label, zh_config, output_dir)
-
-            except Exception as e:
-                logger.error(f"招行每日汇总下载失败: {e}")
-                if zh_page:
-                    try:
-                        screenshot = OUTPUT_DIR / "zhaohang_error.png"
-                        zh_page.screenshot(path=str(screenshot))
-                        logger.info(f"  错误截图已保存: {screenshot}")
-                    except Exception:
-                        pass
-            finally:
-                if zh_page:
-                    try:
-                        zh_page.close()
-                    except Exception:
-                        pass
-                if zh_browser:
-                    try:
-                        zh_browser.close()
-                    except Exception:
-                        pass
-                try:
-                    zh_chrome_process.terminate()
-                except Exception:
-                    pass
-
-            logger.info(f"{'=' * 55}")
-            logger.info(f"  招行每日汇总下载完成！")
-            logger.info(f"{'=' * 55}\n")
-
-            # ── Part 3.7：抖音每日收益 ─────────────────────────────
-            logger.info(f"{'─' * 55}")
-            logger.info(f"  Part 3.7：下载抖音每日收益")
-            logger.info(f"{'─' * 55}")
-
-            logger.info(f"  启动 Chrome (port=9226, profile=C:\\ChromeDebug_MTJYB)...")
-            dy_chrome_process = subprocess.Popen([
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                *(["--headless=new"] if args.headless else []),
-                "--remote-debugging-port=9226",
-                r"--user-data-dir=C:\ChromeDebug_MTJYB",
-            ])
-            time.sleep(5)
-
-            dy_browser = None
-            dy_page = None
-            try:
-                logger.info("  连接到 Chrome...")
-                dy_browser = pw.chromium.connect_over_cdp("http://localhost:9226")
-                dy_context = dy_browser.contexts[0]
-                dy_page = dy_context.new_page()
-                dy_page.set_default_timeout(120000)
-                dy_page.set_default_navigation_timeout(120000)
-
-                # douyin_login(dy_page)  # 暂时注释：使用已登录的 Chrome profile，无需登录
-
-                logger.info("  [导航] 前往抖音每日收益页面...")
-                dy_page.goto(DOUYIN_DAILY_BENEFITS_URL)
-                dy_page.wait_for_selector('.byted-date-picker', timeout=30000)
-                time.sleep(2)
-
-                douyin_set_date(dy_page, target)
-
-                for dy_idx, dy_config in enumerate(DOUYIN_STORE_CONFIG):
-                    dy_store_short = dy_config["store_short"]
-                    logger.info(f"{'─' * 40}")
-                    logger.info(f"  抖音门店 {dy_idx + 1}/{len(DOUYIN_STORE_CONFIG)}: {dy_store_short}")
-                    logger.info(f"{'─' * 40}")
-
-                    douyin_select_store(dy_page, dy_config)
-                    time.sleep(3)
-
-                    dy_data = scrape_douyin_daily_benefits(dy_page)
-                    save_douyin_daily_benefits_csv(dy_data, dy_store_short, date_label, output_dir)
-
-            except Exception as e:
-                logger.error(f"抖音每日收益下载失败: {e}")
-                if dy_page:
-                    try:
-                        screenshot = OUTPUT_DIR / "douyin_error.png"
-                        dy_page.screenshot(path=str(screenshot))
-                        logger.info(f"  错误截图已保存: {screenshot}")
-                    except Exception:
-                        pass
-            finally:
-                if dy_page:
-                    try:
-                        dy_page.close()
-                    except Exception:
-                        pass
-                if dy_browser:
-                    try:
-                        dy_browser.close()
-                    except Exception:
-                        pass
-                try:
-                    dy_chrome_process.terminate()
-                except Exception:
-                    pass
-
-            logger.info(f"{'=' * 55}")
-            logger.info(f"  抖音每日收益下载完成！")
-            logger.info(f"{'=' * 55}\n")
-
-            # ── Part 3.8：高德口碑账单汇总 ─────────────────────────────
-            logger.info(f"{'─' * 55}")
-            logger.info(f"  Part 3.8：下载高德口碑账单汇总")
-            logger.info(f"{'─' * 55}")
-
-            logger.info(f"  启动 Chrome (port=9226, profile=C:\\ChromeDebug_MTJYB)...")
-            kb_chrome_process = subprocess.Popen([
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                *(["--headless=new"] if args.headless else []),
-                "--remote-debugging-port=9226",
-                r"--user-data-dir=C:\ChromeDebug_MTJYB",
-            ])
-            time.sleep(5)
-
-            kb_browser = None
-            kb_page = None
-            try:
-                logger.info("  连接到 Chrome...")
-                kb_browser = pw.chromium.connect_over_cdp("http://localhost:9226")
-                kb_context = kb_browser.contexts[0]
-                kb_page = kb_context.new_page()
-                kb_page.set_default_timeout(120000)
-                kb_page.set_default_navigation_timeout(120000)
-
-                logger.info("  [导航] 前往高德口碑账单汇总页...")
-                kb_page.goto(KOUBEI_BILL_URL)
-                # kb_page.wait_for_load_state("networkidle", timeout=120_000)
-                time.sleep(3)
-
-                for kb_idx, kb_config in enumerate(KOUBEI_STORE_CONFIG):
-                    kb_store_short = kb_config["store_short"]
-                    logger.info(f"{'─' * 40}")
-                    logger.info(f"  口碑门店 {kb_idx + 1}/{len(KOUBEI_STORE_CONFIG)}: {kb_store_short}")
-                    logger.info(f"{'─' * 40}")
-
-                    if kb_idx > 0:
-                        logger.info("  [导航] 重新加载口碑账单汇总页...")
-                        kb_page.goto(KOUBEI_BILL_URL)
-                        # kb_page.wait_for_load_state("networkidle", timeout=120_000)
-                        time.sleep(3)
-
-                    koubei_set_date(kb_page, target)
-
-                    koubei_select_query_type(kb_page)
-                    koubei_select_store(kb_page, kb_config)
-
-                    logger.info("  [查询] 点击查询...")
-                    kb_page.locator('button.aamf-btn-primary:has-text("查 询")').click()
-                    # kb_page.wait_for_load_state("networkidle", timeout=150_000)
-                    time.sleep(3)
-
-                    kb_data = scrape_koubei_bill(kb_page)
-                    save_koubei_bill_csv(kb_data, kb_store_short, date_label, output_dir)
-
-            except Exception as e:
-                logger.error(f"高德口碑账单汇总下载失败: {e}")
-                if kb_page:
-                    try:
-                        screenshot = OUTPUT_DIR / "koubei_error.png"
-                        kb_page.screenshot(path=str(screenshot))
-                        logger.info(f"  错误截图已保存: {screenshot}")
-                    except Exception:
-                        pass
-            finally:
-                if kb_page:
-                    try:
-                        kb_page.close()
-                    except Exception:
-                        pass
-                if kb_browser:
-                    try:
-                        kb_browser.close()
-                    except Exception:
-                        pass
-                try:
-                    kb_chrome_process.terminate()
-                except Exception:
-                    pass
-
-            logger.info(f"{'=' * 55}")
-            logger.info(f"  高德口碑账单汇总下载完成！")
-            logger.info(f"{'=' * 55}\n")
-
-            # ── Part 4：格式化数据并写入月度统计表 ──────────────────────────
-            logger.info(f"{'─' * 55}")
-            logger.info(f"  Part 4：格式化数据并写入月度统计表")
-            logger.info(f"{'─' * 55}")
-
-            for i, store in enumerate(STORES):
-                logger.info(f"{'─' * 40}")
-                logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['template_name']}")
-                logger.info(f"{'─' * 40}")
-
-                monthly_file, created = create_or_open_monthly_file(
-                    store, target, TEMPLATE_FILE, OUTPUT_DIR
-                )
-                fill_daily_data(monthly_file, target, store, output_dir)
-
-            logger.info(f"{'=' * 55}")
-            logger.info(f"  麦安研营业统计格式化全部完成！")
-            logger.info(f"{'=' * 55}\n")
+                eleme_csv_fields = ["结算金额", "订单类", "其他类"]
+                eleme_csv_file = output_dir / f"饿了么账单_{mt_store_short}_{date_label}.csv"
+                with open(eleme_csv_file, "w", newline="", encoding="utf-8-sig") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["项目", "金额"])
+                    for key in eleme_csv_fields:
+                        writer.writerow([key, eleme_data.get(key, 0)])
+                logger.info(f"{TAG}  已保存CSV: {eleme_csv_file.name}")
 
         except Exception as e:
-            logger.error(f"任务失败: {e}")
-            try:
-                screenshot = OUTPUT_DIR / "error_screenshot.png"
-                page.screenshot(path=str(screenshot))
-                logger.info(f"  错误截图已保存: {screenshot}")
-            except Exception:
-                pass
+            logger.error(f"{TAG} 下载失败: {e}")
+            if chrome_page:
+                try:
+                    screenshot = OUTPUT_DIR / f"meituan_error_{mt_store_short}.png"
+                    chrome_page.screenshot(path=str(screenshot))
+                except Exception:
+                    pass
             raise
         finally:
-            context.close()
-            browser.close()
+            _cleanup_chrome(chrome_page, chrome_browser, chrome_process)
+
+
+def run_meituan_waimai_all(args, target, target_str, date_label, output_dir):
+    logger.info(f"[美团外卖] 启动 {len(MEITUAN_STORE_CONFIG)} 个门店并行下载...")
+    with ThreadPoolExecutor(max_workers=len(MEITUAN_STORE_CONFIG)) as executor:
+        futures = {
+            executor.submit(
+                _run_meituan_waimai_store, mt_config, args, target_str, date_label, output_dir
+            ): mt_config["store_short"]
+            for mt_config in MEITUAN_STORE_CONFIG
+        }
+        for future in as_completed(futures):
+            store = futures[future]
+            try:
+                future.result()
+                logger.info(f"[美团外卖-{store}] 完成")
+            except Exception as e:
+                logger.error(f"[美团外卖-{store}] 失败: {e}")
+
+    logger.info("[美团外卖] 全部门店下载完成！")
+
+
+# ─── Group C: 共享 Chrome（经营宝/招行/抖音/口碑）────────────────────────────
+
+
+def run_shared_chrome_tasks(args, target, target_str, date_label, output_dir):
+    from playwright.sync_api import sync_playwright
+
+    # ── 经营宝 ──────────────────────────────
+    TAG = "[经营宝]"
+    logger.info(f"{TAG}  启动 Chrome (port=9226)...")
+    jyb_process = _launch_chrome(9226, r"C:\ChromeDebug_MTJYB", args.headless)
+    jyb_browser = None
+    jyb_page = None
+
+    with sync_playwright() as pw:
+        try:
+            jyb_browser, jyb_page = _connect_cdp(pw, 9226)
+
+            logger.info(f"{TAG}  [导航] 前往美团经营宝每日收益页...")
+            jyb_page.goto(MEITUAN_JYB_URL)
+            jyb_page.wait_for_load_state("networkidle", timeout=120_000)
+            time.sleep(3)
+
+            days_diff = (datetime.now().date() - target.date()).days
+            logger.info(f"{TAG}  → 设置收益时间: {target.strftime('%Y/%m/%d')} (距今 {days_diff} 天)...")
+
+            if days_diff in (0, 1, 2):
+                btn_map = {0: "今日", 1: "昨日", 2: "前日"}
+                jyb_page.locator(f'button[value="{btn_map[days_diff]}"]').click()
+                logger.info(f"{TAG}  已点击快捷按钮: {btn_map[days_diff]}")
+            else:
+                try:
+                    jyb_page.locator('.mtd-date-picker input').click()
+                    time.sleep(1)
+
+                    current_info = jyb_page.evaluate("""
+                        (function() {
+                            var popup = document.querySelector('.mtd-singleRangePicker-pop');
+                            if (!popup) return null;
+                            var leftCal = popup.querySelector('.mtd-date-calendar');
+                            if (!leftCal) return null;
+                            var yearBtn = leftCal.querySelector('.mtd-date-calendar-year-btn');
+                            var monthBtn = leftCal.querySelector('.mtd-date-calendar-month-btn');
+                            if (!yearBtn || !monthBtn) return null;
+                            return { year: parseInt(yearBtn.textContent), month: parseInt(monthBtn.textContent) };
+                        })()
+                    """)
+
+                    if not current_info:
+                        logger.warning(f"{TAG}  日历面板未打开或无法读取年月")
+                    else:
+                        logger.info(f"{TAG}  当前日历: {current_info['year']}年{current_info['month']}月")
+                        months_back = (current_info['year'] - target.year) * 12 + (current_info['month'] - target.month)
+
+                        if months_back > 0:
+                            logger.info(f"{TAG}  往前导航 {months_back} 个月...")
+                            for _ in range(months_back):
+                                jyb_page.locator(
+                                    '.mtd-singleRangePicker-pop .mtd-date-calendar:first-child '
+                                    '.mtd-date-calendar-month-switcher.left-switcher'
+                                ).click()
+                                time.sleep(0.3)
+                            time.sleep(0.5)
+
+                        target_day_str = str(target.day)
+
+                        start_result = jyb_page.evaluate(f"""
+                            (function() {{
+                                var popup = document.querySelector('.mtd-singleRangePicker-pop');
+                                if (!popup) return 'popup not found';
+                                var leftCal = popup.querySelector('.mtd-date-calendar');
+                                var activePanel = leftCal.querySelector('.mtd-date-calendar-content.active');
+                                if (!activePanel) return 'no active panel';
+                                var wrappers = activePanel.querySelectorAll('.mtd-date-panel-data-wrapper');
+                                for (var j = 0; j < wrappers.length; j++) {{
+                                    if (wrappers[j].classList.contains('not-current-month')) continue;
+                                    if (wrappers[j].classList.contains('disabled-date')) continue;
+                                    var btn = wrappers[j].querySelector('.mtd-date-panel-data');
+                                    if (btn && btn.textContent.trim() === '{target_day_str}') {{
+                                        btn.click();
+                                        return 'clicked start: day ' + btn.textContent.trim();
+                                    }}
+                                }}
+                                return 'start day {target_day_str} not found';
+                            }})()
+                        """)
+                        logger.info(f"{TAG}  {start_result}")
+                        time.sleep(0.5)
+
+                        end_result = jyb_page.evaluate(f"""
+                            (function() {{
+                                var popup = document.querySelector('.mtd-singleRangePicker-pop');
+                                if (!popup) return 'popup closed';
+                                var leftCal = popup.querySelector('.mtd-date-calendar');
+                                var activePanel = leftCal.querySelector('.mtd-date-calendar-content.active');
+                                if (!activePanel) return 'no active panel';
+                                var wrappers = activePanel.querySelectorAll('.mtd-date-panel-data-wrapper');
+                                for (var j = 0; j < wrappers.length; j++) {{
+                                    if (wrappers[j].classList.contains('not-current-month')) continue;
+                                    var btn = wrappers[j].querySelector('.mtd-date-panel-data');
+                                    if (btn && btn.textContent.trim() === '{target_day_str}') {{
+                                        btn.click();
+                                        return 'clicked end: day ' + btn.textContent.trim();
+                                    }}
+                                }}
+                                return 'end day {target_day_str} not found';
+                            }})()
+                        """)
+                        logger.info(f"{TAG}  {end_result}")
+
+                except Exception as date_err:
+                    logger.warning(f"{TAG}  日期选择器操作失败: {date_err}")
+                    try:
+                        jyb_page.screenshot(path=str(OUTPUT_DIR / "debug_datepicker.png"))
+                    except Exception:
+                        pass
+
+            logger.info(f"{TAG}  等待数据刷新...")
+            time.sleep(3)
+
+            logger.info(f"{TAG}  → 抓取经营宝收益数据...")
+            jyb_rows = jyb_page.evaluate("""
+                (function() {
+                    var rows = document.querySelectorAll('.mtd-table-body tbody tr');
+                    var result = [];
+                    for (var i = 0; i < rows.length; i++) {
+                        var tds = rows[i].querySelectorAll('td');
+                        if (tds.length < 9) continue;
+                        var storeName = tds[0].textContent.trim();
+                        var priceDiv = tds[2].querySelector('div > div');
+                        var price = priceDiv
+                            ? parseFloat(priceDiv.textContent.trim().replace(/,/g, '')) || 0
+                            : parseFloat(tds[2].textContent.trim().replace(/,/g, '')) || 0;
+                        var promotion = parseFloat(tds[3].textContent.trim().replace(/,/g, '')) || 0;
+                        var service = parseFloat(tds[4].textContent.trim().replace(/,/g, '')) || 0;
+                        var other = parseFloat(tds[8].textContent.trim().replace(/,/g, '')) || 0;
+                        result.push({
+                            storeName: storeName,
+                            price: price,
+                            promotion: promotion,
+                            service: service,
+                            other: other
+                        });
+                    }
+                    return result;
+                })()
+            """)
+            logger.info(f"{TAG}  抓取到 {len(jyb_rows)} 行数据")
+
+            store_keywords = {"宝泰": "宝泰店", "龙江": "龙江店", "杏坛": "杏坛店"}
+            for row in jyb_rows:
+                store_short = None
+                for keyword, short in store_keywords.items():
+                    if keyword in row["storeName"]:
+                        store_short = short
+                        break
+                if not store_short:
+                    logger.warning(f"{TAG}  未匹配门店: {row['storeName']}")
+                    continue
+
+                logger.info(f"{TAG}  {store_short}: 售价={row['price']}, 促销费={row['promotion']}, "
+                            f"服务费={row['service']}, 其他费用={row['other']}")
+
+                jyb_csv = output_dir / f"美团经营宝_每日收益_{store_short}_{date_label}.csv"
+                with open(jyb_csv, "w", newline="", encoding="utf-8-sig") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["项目", "金额"])
+                    writer.writerow(["售价", row["price"]])
+                    writer.writerow(["促销费", row["promotion"]])
+                    writer.writerow(["服务费", row["service"]])
+                    writer.writerow(["其他费用", row["other"]])
+                logger.info(f"{TAG}  已保存CSV: {jyb_csv.name}")
+
+        except Exception as e:
+            logger.error(f"{TAG} 下载失败: {e}")
+            if jyb_page:
+                try:
+                    jyb_page.screenshot(path=str(OUTPUT_DIR / "meituan_jyb_error.png"))
+                except Exception:
+                    pass
+        finally:
+            _cleanup_chrome(jyb_page, jyb_browser, jyb_process)
+
+    logger.info(f"{TAG}  经营宝下载完成！")
+
+    # ── 招行每日汇总 ──────────────────────────────
+    TAG = "[招行]"
+    logger.info(f"{TAG}  启动 Chrome (port=9226)...")
+    zh_process = _launch_chrome(9226, r"C:\ChromeDebug_MTJYB", args.headless)
+    zh_browser = None
+    zh_page = None
+
+    with sync_playwright() as pw:
+        try:
+            zh_browser, zh_page = _connect_cdp(pw, 9226)
+
+            for zh_idx, zh_config in enumerate(ZHAOHANG_STORE_CONFIG):
+                zh_store_short = zh_config["store_short"]
+                logger.info(f"{TAG}  门店 {zh_idx + 1}/{len(ZHAOHANG_STORE_CONFIG)}: {zh_store_short}")
+
+                zh_page.goto(ZHAOHANG_URL)
+                zh_page.wait_for_load_state("networkidle", timeout=120_000)
+                time.sleep(3)
+
+                scrape_zhaohang_daily_summary(zh_page, target_str, date_label, zh_config, output_dir)
+
+        except Exception as e:
+            logger.error(f"{TAG} 下载失败: {e}")
+            if zh_page:
+                try:
+                    zh_page.screenshot(path=str(OUTPUT_DIR / "zhaohang_error.png"))
+                except Exception:
+                    pass
+        finally:
+            _cleanup_chrome(zh_page, zh_browser, zh_process)
+
+    logger.info(f"{TAG}  招行下载完成！")
+
+    # ── 抖音每日收益 ──────────────────────────────
+    TAG = "[抖音]"
+    logger.info(f"{TAG}  启动 Chrome (port=9226)...")
+    dy_process = _launch_chrome(9226, r"C:\ChromeDebug_MTJYB", args.headless)
+    dy_browser = None
+    dy_page = None
+
+    with sync_playwright() as pw:
+        try:
+            dy_browser, dy_page = _connect_cdp(pw, 9226)
+
+            logger.info(f"{TAG}  [导航] 前往抖音每日收益页面...")
+            dy_page.goto(DOUYIN_DAILY_BENEFITS_URL)
+            dy_page.wait_for_selector('.byted-date-picker', timeout=30000)
+            time.sleep(2)
+
+            douyin_set_date(dy_page, target)
+
+            for dy_idx, dy_config in enumerate(DOUYIN_STORE_CONFIG):
+                dy_store_short = dy_config["store_short"]
+                logger.info(f"{TAG}  门店 {dy_idx + 1}/{len(DOUYIN_STORE_CONFIG)}: {dy_store_short}")
+
+                douyin_select_store(dy_page, dy_config)
+                time.sleep(3)
+
+                dy_data = scrape_douyin_daily_benefits(dy_page)
+                save_douyin_daily_benefits_csv(dy_data, dy_store_short, date_label, output_dir)
+
+        except Exception as e:
+            logger.error(f"{TAG} 下载失败: {e}")
+            if dy_page:
+                try:
+                    dy_page.screenshot(path=str(OUTPUT_DIR / "douyin_error.png"))
+                except Exception:
+                    pass
+        finally:
+            _cleanup_chrome(dy_page, dy_browser, dy_process)
+
+    logger.info(f"{TAG}  抖音下载完成！")
+
+    # ── 高德口碑 ──────────────────────────────
+    TAG = "[口碑]"
+    logger.info(f"{TAG}  启动 Chrome (port=9226)...")
+    kb_process = _launch_chrome(9226, r"C:\ChromeDebug_MTJYB", args.headless)
+    kb_browser = None
+    kb_page = None
+
+    with sync_playwright() as pw:
+        try:
+            kb_browser, kb_page = _connect_cdp(pw, 9226)
+
+            logger.info(f"{TAG}  [导航] 前往高德口碑账单汇总页...")
+            kb_page.goto(KOUBEI_BILL_URL)
+            time.sleep(3)
+
+            for kb_idx, kb_config in enumerate(KOUBEI_STORE_CONFIG):
+                kb_store_short = kb_config["store_short"]
+                logger.info(f"{TAG}  门店 {kb_idx + 1}/{len(KOUBEI_STORE_CONFIG)}: {kb_store_short}")
+
+                if kb_idx > 0:
+                    kb_page.goto(KOUBEI_BILL_URL)
+                    time.sleep(3)
+
+                koubei_set_date(kb_page, target)
+                koubei_select_query_type(kb_page)
+                koubei_select_store(kb_page, kb_config)
+
+                logger.info(f"{TAG}  [查询] 点击查询...")
+                kb_page.locator('button.aamf-btn-primary:has-text("查 询")').click()
+                time.sleep(3)
+
+                kb_data = scrape_koubei_bill(kb_page)
+                save_koubei_bill_csv(kb_data, kb_store_short, date_label, output_dir)
+
+        except Exception as e:
+            logger.error(f"{TAG} 下载失败: {e}")
+            if kb_page:
+                try:
+                    kb_page.screenshot(path=str(OUTPUT_DIR / "koubei_error.png"))
+                except Exception:
+                    pass
+        finally:
+            _cleanup_chrome(kb_page, kb_browser, kb_process)
+
+    logger.info(f"{TAG}  口碑下载完成！")
+
+
+# ─── Group D: 格式化写入 ────────────────────────────────────────────────────
+
+
+def run_formatting(target, output_dir, date_label):
+    logger.info(f"{'─' * 55}")
+    logger.info(f"  格式化数据并写入月度统计表")
+    logger.info(f"{'─' * 55}")
+
+    for i, store in enumerate(STORES):
+        logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['template_name']}")
+
+        monthly_file, created = create_or_open_monthly_file(
+            store, target, TEMPLATE_FILE, OUTPUT_DIR
+        )
+        fill_daily_data(monthly_file, target, store, output_dir)
+
+    logger.info(f"{'=' * 55}")
+    logger.info(f"  麦安研营业统计格式化全部完成！")
+    logger.info(f"{'=' * 55}\n")
+
+
+# ─── 主入口 ──────────────────────────────────────────────────────────────────
+
+
+def main():
+    parser = argparse.ArgumentParser(description="麦安研营业统计自动化脚本")
+    parser.add_argument("--days", type=int, default=0, help="日期偏移量：0=今天，-1=昨天（默认0）")
+    parser.add_argument("--date", type=str, help="指定目标日期，格式 YYYY.MM.DD")
+    parser.add_argument("--headless", action="store_true", help="无头模式（不显示浏览器窗口）")
+    args = parser.parse_args()
+
+    target = get_target_date(days=args.days, date_str=args.date)
+    target_str = target.strftime("%Y.%m.%d")
+    date_label = target.strftime("%Y-%m-%d")
+
+    logger.info(f"{'=' * 55}")
+    logger.info(f"  麦安研营业统计（并行模式）")
+    logger.info(f"  目标日期：{target_str}")
+    logger.info(f"  输出根目录：{OUTPUT_DIR}")
+    logger.info(f"{'=' * 55}")
+
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: F401
+    except ImportError:
+        logger.error("未安装 playwright，请先运行: pip install playwright && playwright install chromium")
+        sys.exit(1)
+
+    output_dir = OUTPUT_DIR / "原始下载" / date_label
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── 三大组并行执行 ──────────────────────────────
+    errors = []
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {
+            executor.submit(run_pospal_tasks, args, target, target_str, date_label, output_dir): "银豹系统",
+            executor.submit(run_meituan_waimai_all, args, target, target_str, date_label, output_dir): "美团外卖",
+            executor.submit(run_shared_chrome_tasks, args, target, target_str, date_label, output_dir): "共享Chrome任务",
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                future.result()
+                logger.info(f"  >>> {name} 全部完成")
+            except Exception as e:
+                logger.error(f"  >>> {name} 失败: {e}")
+                errors.append((name, e))
+
+    # ── 格式化写入（等待所有下载完成后执行）──────────────────
+    run_formatting(target, output_dir, date_label)
+
+    if errors:
+        logger.warning(f"  以下任务组出现错误:")
+        for name, e in errors:
+            logger.warning(f"    - {name}: {e}")
+    else:
+        logger.info(f"  全部任务成功完成！")
 
 
 if __name__ == "__main__":
