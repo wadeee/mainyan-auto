@@ -3,7 +3,7 @@
 =====================================
 依赖：pip install playwright && playwright install chromium
 
-自动登录 Pospal 后台，导出麦安研各门店的营业概况日度统计数据。
+自动登录银豹后台，导出麦安研各门店的营业概况日度统计数据。
 
 用法：
     python mainyan_turnover_statistics.py                    # 导出今天数据
@@ -1361,7 +1361,7 @@ def save_douyin_daily_benefits_csv(data, store_short, date_label, output_dir):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Pospal 麦安研营业统计自动化脚本")
+    parser = argparse.ArgumentParser(description="麦安研营业统计自动化脚本")
     parser.add_argument("--days", type=int, default=0, help="日期偏移量：0=今天，-1=昨天（默认0）")
     parser.add_argument("--date", type=str, help="指定目标日期，格式 YYYY.MM.DD")
     parser.add_argument("--headless", action="store_true", help="无头模式（不显示浏览器窗口）")
@@ -1372,7 +1372,7 @@ def main():
     date_label = target.strftime("%Y-%m-%d")
 
     logger.info(f"{'=' * 55}")
-    logger.info(f"  Pospal 麦安研营业统计")
+    logger.info(f"  麦安研营业统计")
     logger.info(f"  目标日期：{target_str}")
     logger.info(f"  输出根目录：{OUTPUT_DIR}")
     logger.info(f"{'=' * 55}")
