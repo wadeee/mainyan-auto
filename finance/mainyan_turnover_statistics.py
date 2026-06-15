@@ -82,6 +82,11 @@ ELEME_BILL_URL = "https://napos-bill-pc.faas.ele.me/napos-bill-pc/v2/bill-checki
 # 招行每日汇总
 ZHAOHANG_URL = "https://ym.o2o.cmbchina.com/mc/merchant/handms/dailySummary.html"
 
+# 高德口碑
+# https://e.koubei.com
+# 高德口碑账单汇总
+KOUBEI_BILL_URL = "https://e.koubei.com/kb-pc/finance-mono/merchant/bill/realtime/summary"
+
 MEITUAN_STORE_CONFIG = [
     {
         "store_short": "宝泰店",
@@ -120,6 +125,14 @@ DOUYIN_STORE_CONFIG = [
     {"store_short": "龙江店", "search_keyword": "龙江"},
     {"store_short": "杏坛店", "search_keyword": "杏坛"},
 ]
+
+KOUBEI_STORE_CONFIG = [
+    {"store_short": "宝泰店", "store_name": "MAINYAN麦安研(东方宝泰店)"},
+    {"store_short": "龙江店", "store_name": "麦安研(顺德龙江店)"},
+    {"store_short": "杏坛店", "store_name": "麦安研(顺德杏坛店)"},
+]
+
+KOUBEI_CSV_FIELDS = ["订单金额", "商家优惠", "服务费"]
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "麦安研营业统计"
 TEMPLATE_FILE = Path(__file__).resolve().parent / "麦安研营业统计_格式化模板.xlsx"
@@ -378,6 +391,14 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
         douyin = read_unionpay_bill_csv(douyin_file)
         logger.info(f"  读取抖音 订单实收={douyin.get('订单实收')}, 佣金/服务费支出={douyin.get('佣金/服务费支出')}")
 
+    koubei_file = daily_download_dir / f"高德口碑账单汇总_{store['short']}_{date_label}.csv"
+    if not koubei_file.exists():
+        logger.warning(f"  高德口碑账单汇总不存在，跳过填写: {koubei_file.name}")
+        koubei = None
+    else:
+        koubei = read_unionpay_bill_csv(koubei_file)
+        logger.info(f"  读取口碑 订单金额={koubei.get('订单金额')}, 商家优惠={koubei.get('商家优惠')}, 服务费={koubei.get('服务费')}")
+
     wb = _lwb(monthly_file)
     ws1 = wb.worksheets[0]
 
@@ -449,6 +470,14 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
             ws1.cell(row=row_s1, column=51).value = douyin["订单实收"]
         if douyin.get("佣金/服务费支出") is not None:
             ws1.cell(row=row_s1, column=52).value = douyin["佣金/服务费支出"]
+
+    if koubei:
+        if koubei.get("订单金额") is not None:
+            ws1.cell(row=row_s1, column=55).value = koubei["订单金额"]
+        if koubei.get("商家优惠") is not None:
+            ws1.cell(row=row_s1, column=56).value = koubei["商家优惠"]
+        if koubei.get("服务费") is not None:
+            ws1.cell(row=row_s1, column=57).value = koubei["服务费"]
 
     wb.save(monthly_file)
     wb.close()
@@ -1360,6 +1389,160 @@ def save_douyin_daily_benefits_csv(data, store_short, date_label, output_dir):
     return csv_file
 
 
+def koubei_set_date(page, target):
+    """在高德口碑账单汇总页面设置日期范围（起止日期相同）。"""
+    date_start = target.strftime("%Y-%m-%d") + " 00:00:00"
+    date_end = target.strftime("%Y-%m-%d") + " 23:59:59"
+    logger.info(f"  → 设置日期: {date_start} ~ {date_end}...")
+
+    start_input = page.locator('input[date-range="start"]')
+    start_input.click()
+    time.sleep(1)
+
+    page.wait_for_selector('.aamf-picker-dropdown', timeout=5000)
+
+    start_input.press("Control+a")
+    start_input.type(date_start, delay=30)
+    time.sleep(0.5)
+
+    logger.info("    点击确定（开始时间）...")
+    page.locator('.aamf-picker-dropdown .aamf-picker-ok button').click()
+    time.sleep(1)
+
+    end_input = page.locator('input[date-range="end"]')
+    end_input.press("Control+a")
+    end_input.type(date_end, delay=30)
+    time.sleep(0.5)
+
+    logger.info("    点击确定（结束时间）...")
+    page.locator('.aamf-picker-dropdown .aamf-picker-ok button').click()
+    time.sleep(1)
+
+    logger.info(f"  日期已设置: {date_start} ~ {date_end}")
+
+
+def koubei_select_query_type(page):
+    """在高德口碑页面将查询方式切换为"按门店查询"。"""
+    logger.info("  → 选择查询方式: 按门店查询...")
+
+    select_el = page.locator('.aamf-select-single').first
+    select_el.click()
+    time.sleep(0.5)
+
+    result = page.evaluate("""
+        (function() {
+            var items = document.querySelectorAll('.aamf-select-item');
+            for (var i = 0; i < items.length; i++) {
+                if (items[i].textContent.trim() === '按门店查询') {
+                    items[i].click();
+                    return 'selected: 按门店查询';
+                }
+            }
+            var names = [];
+            for (var i = 0; i < items.length; i++) names.push(items[i].textContent.trim());
+            return 'not found. Available: ' + names.join(', ');
+        })()
+    """)
+    logger.info(f"    查询方式: {result}")
+    time.sleep(1)
+
+
+def koubei_select_store(page, store_config):
+    """在高德口碑账单汇总页面选择单个门店（通过弹窗选择）。"""
+    store_name = store_config["store_name"]
+    logger.info(f"  → 选择门店: {store_name}...")
+
+    store_input = page.locator('input[placeholder="请选择"][readonly]')
+    store_input.click(force=True)
+    time.sleep(1)
+
+    try:
+        page.wait_for_selector('.aamf-modal', timeout=5000)
+    except Exception:
+        logger.warning("  门店选择弹窗未出现，尝试再次点击...")
+        store_input.click(force=True)
+        time.sleep(2)
+
+    page.evaluate("""
+        (function() {
+            var rows = document.querySelectorAll('.aamf-modal .aamf-table-tbody tr.aamf-table-row');
+            for (var i = 0; i < rows.length; i++) {
+                var cb = rows[i].querySelector('.aamf-checkbox-input');
+                if (cb && cb.checked) {
+                    cb.click();
+                }
+            }
+        })()
+    """)
+    time.sleep(0.5)
+
+    result = page.evaluate(f"""
+        (function() {{
+            var rows = document.querySelectorAll('.aamf-modal .aamf-table-tbody tr.aamf-table-row');
+            for (var i = 0; i < rows.length; i++) {{
+                var tds = rows[i].querySelectorAll('td.aamf-table-cell');
+                for (var j = 0; j < tds.length; j++) {{
+                    if (tds[j].textContent.trim() === '{store_name}') {{
+                        var cb = rows[i].querySelector('.aamf-checkbox-input');
+                        if (cb && !cb.checked) cb.click();
+                        return 'checked: ' + tds[j].textContent.trim();
+                    }}
+                }}
+            }}
+            var names = [];
+            for (var i = 0; i < rows.length; i++) {{
+                var tds = rows[i].querySelectorAll('td.aamf-table-cell');
+                if (tds.length >= 3) names.push(tds[2].textContent.trim());
+            }}
+            return 'not found: {store_name}. Available: ' + names.join(', ');
+        }})()
+    """)
+    logger.info(f"    选择门店: {result}")
+    time.sleep(0.5)
+
+    confirm_btn = page.locator('.aamf-modal-footer button.aamf-btn-primary')
+    confirm_btn.click()
+    time.sleep(1)
+    logger.info("    弹窗已确认")
+
+
+def scrape_koubei_bill(page):
+    """从高德口碑账单汇总页面抓取汇总区域的数据。"""
+    data = page.evaluate("""
+        (function() {
+            var result = {};
+            var nameEls = document.querySelectorAll('.name--pnzqmgDZ');
+            var valueEls = document.querySelectorAll('.value--NiKhfQ57');
+            for (var i = 0; i < nameEls.length; i++) {
+                var rawName = nameEls[i].textContent.trim();
+                var name = rawName.replace(/（元）/g, '').replace(/\\(元\\)/g, '');
+                if (i < valueEls.length) {
+                    var val = parseFloat(valueEls[i].textContent.trim().replace(/,/g, '')) || 0;
+                    result[name] = val;
+                }
+            }
+            return result;
+        })()
+    """)
+    if not data:
+        logger.warning("  未抓取到口碑数据，可能页面未加载完成")
+    else:
+        logger.info(f"  抓取到口碑数据: {json.dumps(data, ensure_ascii=False)}")
+    return data
+
+
+def save_koubei_bill_csv(data, store_short, date_label, output_dir):
+    """将高德口碑账单汇总数据保存为 CSV。"""
+    csv_file = output_dir / f"高德口碑账单汇总_{store_short}_{date_label}.csv"
+    with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(["项目", "金额"])
+        for key in KOUBEI_CSV_FIELDS:
+            writer.writerow([key, data.get(key, 0)])
+    logger.info(f"  已保存CSV: {csv_file.name}")
+    return csv_file
+
+
 def main():
     parser = argparse.ArgumentParser(description="麦安研营业统计自动化脚本")
     parser.add_argument("--days", type=int, default=0, help="日期偏移量：0=今天，-1=昨天（默认0）")
@@ -2154,6 +2337,89 @@ def main():
 
             logger.info(f"{'=' * 55}")
             logger.info(f"  抖音每日收益下载完成！")
+            logger.info(f"{'=' * 55}\n")
+
+            # ── Part 3.8：高德口碑账单汇总 ─────────────────────────────
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  Part 3.8：下载高德口碑账单汇总")
+            logger.info(f"{'─' * 55}")
+
+            logger.info(f"  启动 Chrome (port=9226, profile=C:\\ChromeDebug_MTJYB)...")
+            kb_chrome_process = subprocess.Popen([
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                *(["--headless=new"] if args.headless else []),
+                "--remote-debugging-port=9226",
+                r"--user-data-dir=C:\ChromeDebug_MTJYB",
+            ])
+            time.sleep(5)
+
+            kb_browser = None
+            kb_page = None
+            try:
+                logger.info("  连接到 Chrome...")
+                kb_browser = pw.chromium.connect_over_cdp("http://localhost:9226")
+                kb_context = kb_browser.contexts[0]
+                kb_page = kb_context.new_page()
+                kb_page.set_default_timeout(120000)
+                kb_page.set_default_navigation_timeout(120000)
+
+                logger.info("  [导航] 前往高德口碑账单汇总页...")
+                kb_page.goto(KOUBEI_BILL_URL)
+                kb_page.wait_for_load_state("networkidle", timeout=120_000)
+                time.sleep(3)
+
+                for kb_idx, kb_config in enumerate(KOUBEI_STORE_CONFIG):
+                    kb_store_short = kb_config["store_short"]
+                    logger.info(f"{'─' * 40}")
+                    logger.info(f"  口碑门店 {kb_idx + 1}/{len(KOUBEI_STORE_CONFIG)}: {kb_store_short}")
+                    logger.info(f"{'─' * 40}")
+
+                    if kb_idx > 0:
+                        logger.info("  [导航] 重新加载口碑账单汇总页...")
+                        kb_page.goto(KOUBEI_BILL_URL)
+                        # kb_page.wait_for_load_state("networkidle", timeout=120_000)
+                        time.sleep(3)
+
+                    koubei_set_date(kb_page, target)
+
+                    koubei_select_query_type(kb_page)
+                    koubei_select_store(kb_page, kb_config)
+
+                    logger.info("  [查询] 点击查询...")
+                    kb_page.locator('button.aamf-btn-primary:has-text("查 询")').click()
+                    # kb_page.wait_for_load_state("networkidle", timeout=150_000)
+                    time.sleep(3)
+
+                    kb_data = scrape_koubei_bill(kb_page)
+                    save_koubei_bill_csv(kb_data, kb_store_short, date_label, output_dir)
+
+            except Exception as e:
+                logger.error(f"高德口碑账单汇总下载失败: {e}")
+                if kb_page:
+                    try:
+                        screenshot = OUTPUT_DIR / "koubei_error.png"
+                        kb_page.screenshot(path=str(screenshot))
+                        logger.info(f"  错误截图已保存: {screenshot}")
+                    except Exception:
+                        pass
+            finally:
+                if kb_page:
+                    try:
+                        kb_page.close()
+                    except Exception:
+                        pass
+                if kb_browser:
+                    try:
+                        kb_browser.close()
+                    except Exception:
+                        pass
+                try:
+                    kb_chrome_process.terminate()
+                except Exception:
+                    pass
+
+            logger.info(f"{'=' * 55}")
+            logger.info(f"  高德口碑账单汇总下载完成！")
             logger.info(f"{'=' * 55}\n")
 
             # ── Part 4：格式化数据并写入月度统计表 ──────────────────────────
