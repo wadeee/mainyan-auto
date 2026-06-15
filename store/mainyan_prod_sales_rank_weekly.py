@@ -171,28 +171,11 @@ def read_discard_data(data_file: Path):
     return discard_map
 
 
-def _build_discard_lookup(discard_map, sale_rows):
-    """构建报损查找表：通过商品条码一对一匹配销售与报损数据。
-
-    discard_map: {条码: 报损数量}
-    sale_rows: list[dict]，每行含 "商品名称" 和 "商品条码"
-    返回: {商品名称: 报损数量}
-    """
-    lookup = {}
-    for row in sale_rows:
-        barcode = row.get("商品条码")
-        if barcode and barcode in discard_map:
-            lookup[row["商品名称"]] = discard_map[barcode]
-    return lookup
-
-
 def fill_template(sale_rows, discard_map, template_file: Path, output_file: Path,
                   store_short: str, monday: datetime, sunday: datetime):
     """将销售和报损数据填入模板，按分类分组、按商品总售价降序排列。"""
     from openpyxl import load_workbook as _lwb
     from openpyxl.cell.rich_text import CellRichText, TextBlock
-
-    discard_lookup = _build_discard_lookup(discard_map, sale_rows)
 
     wb = _lwb(template_file, rich_text=True)
     ws = wb.active
@@ -239,8 +222,9 @@ def fill_template(sale_rows, discard_map, template_file: Path, output_file: Path
         ws.cell(row=r, column=4).value = row_data.get("销售数量")      # D: 销售数量
         ws.cell(row=r, column=5).value = row_data.get("商品总售价")    # E: 商品总售价
         ws.cell(row=r, column=6).value = f"=D{r}/7"                   # F: 日均销量（公式）
-        ws.cell(row=r, column=7).value = discard_lookup.get(name)       # G: 报废量
-        ws.cell(row=r, column=8).value = f"=G{r}/(G{r}+D{r})"        # H: 报废率（公式）
+        barcode = row_data.get("商品条码", "")
+        ws.cell(row=r, column=7).value = discard_map.get(barcode)      # G: 报废量
+        ws.cell(row=r, column=8).value = f"=IF(G{r}=0,\"\",G{r}/(G{r}+D{r}))"        # H: 报废率（公式）
         # I: 备注 留空
 
         style_cells = category_styles[cat]
