@@ -2365,7 +2365,7 @@ def main():
 
                 logger.info("  [导航] 前往高德口碑账单汇总页...")
                 kb_page.goto(KOUBEI_BILL_URL)
-                kb_page.wait_for_load_state("networkidle", timeout=120_000)
+                # kb_page.wait_for_load_state("networkidle", timeout=120_000)
                 time.sleep(3)
 
                 for kb_idx, kb_config in enumerate(KOUBEI_STORE_CONFIG):
