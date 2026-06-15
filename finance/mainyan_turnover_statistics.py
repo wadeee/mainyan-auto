@@ -407,6 +407,7 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
             ws1.cell(row=row_s1, column=5).value = summary["ws2_c4"]
         if summary["c16"] is not None:
             ws1.cell(row=row_s1, column=6).value = summary["c16"]
+            ws1.cell(row=row_s1, column=7).value = summary["c16"]
         if summary["e4"] is not None:
             ws1.cell(row=row_s1, column=21).value = summary["e4"]
         if summary["b4_recharge"] is not None:
