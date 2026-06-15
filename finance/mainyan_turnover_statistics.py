@@ -1562,6 +1562,11 @@ def main():
                     chrome_page.set_default_timeout(120000)
                     chrome_page.set_default_navigation_timeout(120000)
 
+                    logger.info("  [导航] 先进入美团外卖结算账单页...")
+                    chrome_page.goto("https://e.waimai.meituan.com/#https://waimaieapp.meituan.com/finance/pc/settleBill")
+                    chrome_page.wait_for_load_state("networkidle", timeout=120_000)
+                    time.sleep(5)
+
                     logger.info("  [导航] 前往美团外卖账单明细页...")
                     chrome_page.goto(MEITUAN_DOWNLOAD_URL)
                     chrome_page.wait_for_load_state("networkidle", timeout=120_000)
