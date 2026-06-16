@@ -2016,8 +2016,6 @@ def _run_jyb_task(args, target, target_str, date_label, output_dir):
     TAG = "[经营宝]"
     from playwright.sync_api import sync_playwright
 
-    logger.info(f"{TAG}  启动 Chrome (port=9226)...")
-    jyb_process = _launch_chrome(9226, r"C:\ChromeDebug_MTJYB", args.headless)
     jyb_browser = None
     jyb_page = None
 
@@ -2173,7 +2171,16 @@ def _run_jyb_task(args, target, target_str, date_label, output_dir):
                 logger.info(f"{TAG}  已保存CSV: {jyb_csv.name}")
 
         finally:
-            _cleanup_chrome(jyb_page, jyb_browser, jyb_process)
+            if jyb_page:
+                try:
+                    jyb_page.close()
+                except Exception:
+                    pass
+            if jyb_browser:
+                try:
+                    jyb_browser.close()
+                except Exception:
+                    pass
 
     logger.info(f"{TAG}  经营宝下载完成！")
 
@@ -2182,8 +2189,6 @@ def _run_zhaohang_task(args, target, target_str, date_label, output_dir):
     TAG = "[招行]"
     from playwright.sync_api import sync_playwright
 
-    logger.info(f"{TAG}  启动 Chrome (port=9226)...")
-    zh_process = _launch_chrome(9226, r"C:\ChromeDebug_MTJYB", args.headless)
     zh_browser = None
     zh_page = None
 
@@ -2205,7 +2210,16 @@ def _run_zhaohang_task(args, target, target_str, date_label, output_dir):
                 retry_until_success(_do_zhaohang, desc)
 
         finally:
-            _cleanup_chrome(zh_page, zh_browser, zh_process)
+            if zh_page:
+                try:
+                    zh_page.close()
+                except Exception:
+                    pass
+            if zh_browser:
+                try:
+                    zh_browser.close()
+                except Exception:
+                    pass
 
     logger.info(f"{TAG}  招行下载完成！")
 
@@ -2214,8 +2228,6 @@ def _run_douyin_task(args, target, target_str, date_label, output_dir):
     TAG = "[抖音]"
     from playwright.sync_api import sync_playwright
 
-    logger.info(f"{TAG}  启动 Chrome (port=9226)...")
-    dy_process = _launch_chrome(9226, r"C:\ChromeDebug_MTJYB", args.headless)
     dy_browser = None
     dy_page = None
 
@@ -2244,7 +2256,16 @@ def _run_douyin_task(args, target, target_str, date_label, output_dir):
                 retry_until_success(_do_douyin, desc)
 
         finally:
-            _cleanup_chrome(dy_page, dy_browser, dy_process)
+            if dy_page:
+                try:
+                    dy_page.close()
+                except Exception:
+                    pass
+            if dy_browser:
+                try:
+                    dy_browser.close()
+                except Exception:
+                    pass
 
     logger.info(f"{TAG}  抖音下载完成！")
 
@@ -2253,8 +2274,6 @@ def _run_koubei_task(args, target, target_str, date_label, output_dir):
     TAG = "[口碑]"
     from playwright.sync_api import sync_playwright
 
-    logger.info(f"{TAG}  启动 Chrome (port=9226)...")
-    kb_process = _launch_chrome(9226, r"C:\ChromeDebug_MTJYB", args.headless)
     kb_browser = None
     kb_page = None
 
@@ -2289,28 +2308,47 @@ def _run_koubei_task(args, target, target_str, date_label, output_dir):
                 retry_until_success(_do_koubei, desc)
 
         finally:
-            _cleanup_chrome(kb_page, kb_browser, kb_process)
+            if kb_page:
+                try:
+                    kb_page.close()
+                except Exception:
+                    pass
+            if kb_browser:
+                try:
+                    kb_browser.close()
+                except Exception:
+                    pass
 
     logger.info(f"{TAG}  口碑下载完成！")
 
 
 def run_shared_chrome_tasks(args, target, target_str, date_label, output_dir):
-    retry_until_success(
-        lambda: _run_jyb_task(args, target, target_str, date_label, output_dir),
-        "经营宝"
-    )
-    retry_until_success(
-        lambda: _run_zhaohang_task(args, target, target_str, date_label, output_dir),
-        "招行"
-    )
-    retry_until_success(
-        lambda: _run_douyin_task(args, target, target_str, date_label, output_dir),
-        "抖音"
-    )
-    retry_until_success(
-        lambda: _run_koubei_task(args, target, target_str, date_label, output_dir),
-        "口碑"
-    )
+    logger.info("  启动共享 Chrome (port=9226)...")
+    chrome_process = _launch_chrome(9226, r"C:\ChromeDebug_MTJYB", args.headless)
+    try:
+        retry_until_success(
+            lambda: _run_jyb_task(args, target, target_str, date_label, output_dir),
+            "经营宝"
+        )
+        retry_until_success(
+            lambda: _run_zhaohang_task(args, target, target_str, date_label, output_dir),
+            "招行"
+        )
+        retry_until_success(
+            lambda: _run_douyin_task(args, target, target_str, date_label, output_dir),
+            "抖音"
+        )
+        retry_until_success(
+            lambda: _run_koubei_task(args, target, target_str, date_label, output_dir),
+            "口碑"
+        )
+    finally:
+        logger.info("  关闭共享 Chrome (port=9226)...")
+        if chrome_process:
+            try:
+                chrome_process.terminate()
+            except Exception:
+                pass
 
 
 # ─── Group D: 格式化写入 ────────────────────────────────────────────────────
