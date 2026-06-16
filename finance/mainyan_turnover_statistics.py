@@ -304,11 +304,13 @@ def _create_monthly_from_template(template_file: Path, output_file: Path, store_
 
     a1_val_1 = ws1.cell(row=1, column=1).value
     if a1_val_1 and isinstance(a1_val_1, str):
-        ws1.cell(row=1, column=1).value = a1_val_1.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月", f"{year}年{month}月")
+        ws1.cell(row=1, column=1).value = a1_val_1.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月",
+                                                                                                    f"{year}年{month}月")
 
     a1_val_2 = ws2.cell(row=1, column=1).value
     if a1_val_2 and isinstance(a1_val_2, str):
-        ws2.cell(row=1, column=1).value = a1_val_2.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月", f"{year}年{month}月")
+        ws2.cell(row=1, column=1).value = a1_val_2.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月",
+                                                                                                    f"{year}年{month}月")
 
     for day in range(1, 32):
         row_s1 = day + 4
@@ -427,7 +429,8 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
         koubei = None
     else:
         koubei = read_unionpay_bill_csv(koubei_file)
-        logger.info(f"  读取口碑 订单金额={koubei.get('订单金额')}, 商家优惠={koubei.get('商家优惠')}, 服务费={koubei.get('服务费')}")
+        logger.info(
+            f"  读取口碑 订单金额={koubei.get('订单金额')}, 商家优惠={koubei.get('商家优惠')}, 服务费={koubei.get('服务费')}")
 
     wb = _lwb(monthly_file)
     ws1 = wb.worksheets[0]
@@ -1597,15 +1600,6 @@ def _launch_chrome(port, user_data_dir, headless=False):
     ])
     time.sleep(8)
     return process
-
-
-def _connect_cdp(pw, port):
-    browser = pw.chromium.connect_over_cdp(f"http://localhost:{port}")
-    context = browser.contexts[0]
-    page = context.new_page()
-    page.set_default_timeout(120000)
-    page.set_default_navigation_timeout(120000)
-    return browser, page
 
 
 def _cleanup_chrome(page, browser, process):
