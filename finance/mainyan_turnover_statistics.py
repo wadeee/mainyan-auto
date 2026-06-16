@@ -568,7 +568,7 @@ def login(page):
             return 'not found';
         })()
     """)
-    time.sleep(1.5)
+    time.sleep(0.3)
 
     placeholder = page.evaluate("""
         (function() {
@@ -602,13 +602,13 @@ def login(page):
         }})()
     """)
 
-    time.sleep(1.5)
+    time.sleep(0.3)
 
     logger.info("[4/4] 点击登录按钮...")
     click_by_text(page, "登 录", "登录")
     page.wait_for_load_state("networkidle", timeout=120_000)
 
-    time.sleep(2)
+    time.sleep(1)
 
 
 def select_store(page, store_full_name: str):
@@ -617,7 +617,7 @@ def select_store(page, store_full_name: str):
 
     dropdown = page.locator("#ddl_subUsers")
     dropdown.click()
-    time.sleep(0.5)
+    time.sleep(0.3)
 
     page.evaluate("""
         (function() {
@@ -782,7 +782,7 @@ def scrape_zhaohang_daily_summary(page, target_str, date_label, zh_config, outpu
             }}
         }})()
     """)
-    time.sleep(1)
+    time.sleep(0.3)
 
     date_dash = date_label
     logger.info(f"  → 设置日期: {date_dash}...")
@@ -802,11 +802,11 @@ def scrape_zhaohang_daily_summary(page, target_str, date_label, zh_config, outpu
             }}
         }})()
     """)
-    time.sleep(0.5)
+    time.sleep(0.3)
 
     logger.info("  [查询] 点击查询...")
     page.locator("button.J-query").click()
-    time.sleep(3)
+    time.sleep(2)
 
     logger.info("  → 抓取商户实收总计...")
     zh_data = page.evaluate("""
@@ -858,7 +858,7 @@ def select_unionpay_store(page, config):
         search_input.click()
     else:
         cascader.locator(".el-input__inner").click(force=True)
-    time.sleep(0.5)
+    time.sleep(0.3)
 
     panel = page.locator(".el-cascader__dropdown:visible, .el-popper:visible .el-cascader-panel")
     if panel.count() == 0:
@@ -866,7 +866,7 @@ def select_unionpay_store(page, config):
             search_input.click()
         else:
             cascader.locator(".el-input__inner").click(force=True)
-        time.sleep(0.5)
+        time.sleep(0.3)
 
     cleared = page.evaluate("""
         (function() {
@@ -881,7 +881,7 @@ def select_unionpay_store(page, config):
     """)
     if cleared > 0:
         logger.info(f"    清除面板中已选复选框: {cleared} 个")
-        time.sleep(0.5)
+        time.sleep(0.3)
 
     if config.get("parent_node"):
         parent = config["parent_node"]
@@ -911,7 +911,7 @@ def select_unionpay_store(page, config):
             }})()
         """)
         logger.info(f"    展开父节点: {result}")
-        time.sleep(0.5)
+        time.sleep(0.3)
 
     for item_name in config["select_items"]:
         result = page.evaluate(f"""
@@ -939,7 +939,7 @@ def select_unionpay_store(page, config):
             }})()
         """)
         logger.info(f"    选择: {result}")
-        time.sleep(0.5)
+        time.sleep(0.3)
 
     page.locator("body").click(position={"x": 0, "y": 0})
     time.sleep(0.3)
@@ -952,7 +952,7 @@ def select_store_type_consumption(page):
     selector = page.locator("[p-single-selector='userTypeOpts']")
     if selector.count() > 0:
         selector.click()
-        time.sleep(0.5)
+        time.sleep(0.3)
 
     result = page.evaluate("""
         (function() {
@@ -971,7 +971,7 @@ def select_store_type_consumption(page):
         })()
     """)
     logger.info(f"  门店类型: {result}")
-    time.sleep(0.5)
+    time.sleep(0.3)
 
 
 def select_stores_multi(page, store_names):
@@ -1022,7 +1022,7 @@ def set_vue_date(page, target_str):
             range_inputs.nth(idx).press("Control+a")
             range_inputs.nth(idx).type(date_dash, delay=50)
         range_inputs.nth(1).press("Enter")
-        time.sleep(0.5)
+        time.sleep(0.3)
         logger.info(f"  日期已设置(range): {date_dash}")
         return
 
@@ -1034,7 +1034,7 @@ def set_vue_date(page, target_str):
             date_inputs.nth(idx).press("Control+a")
             date_inputs.nth(idx).type(date_dash, delay=50)
             date_inputs.nth(idx).press("Enter")
-            time.sleep(0.5)
+            time.sleep(0.3)
         logger.info(f"  日期已设置(editor): {date_dash}")
         return
 
@@ -1057,65 +1057,65 @@ def set_vue_date(page, target_str):
     logger.info(f"  日期已设置(fallback): {date_dash}")
 
 
-def douyin_login(page):
-    """登录抖音来客平台。"""
-    logger.info("  [抖音] 打开登录页面...")
-    page.goto(DOUYIN_LOGIN_URL)
-    # page.wait_for_load_state("networkidle")
-    time.sleep(3)
-
-    # if "/p/" in page.url:
-    #     logger.info("  [抖音] 已登录，跳过登录步骤")
-    #     return
-
-    logger.info("  [抖音] 点击「立即登录」...")
-    page.locator('text="立即登录"').first.click()
-    time.sleep(3)
-
-    logger.info("  [抖音] 切换到「密码登录」...")
-    page.locator('text="密码登录"').first.click()
-    time.sleep(2)
-
-    logger.info("  [抖音] 输入账号...")
-    phone_input = page.locator('input[placeholder*="手机"], input[placeholder*="账号"]').first
-    phone_input.click()
-    phone_input.fill(DOUYIN_ACCOUNT)
-    time.sleep(0.5)
-
-    logger.info("  [抖音] 输入密码...")
-    pwd_input = page.locator('input[type="password"]').first
-    pwd_input.click()
-    pwd_input.fill(DOUYIN_PASSWORD)
-    time.sleep(0.5)
-
-    logger.info("  [抖音] 勾选「已阅读并同意用户协议和隐私条款」...")
-    page.evaluate("""
-        (function() {
-            var cb = document.querySelector('input.life-core-check-wrapper[type="checkbox"]');
-            if (cb) { cb.click(); return 'clicked input'; }
-            var label = document.querySelector('.life-core-checkbox');
-            if (label) { label.click(); return 'clicked label'; }
-            return 'not found';
-        })()
-    """)
-    time.sleep(0.5)
-
-    logger.info("  [抖音] 点击登录按钮...")
-    login_btn = page.locator('button:text-is("登录")')
-    if login_btn.count() == 0:
-        login_btn = page.locator('button:text-is("登 录")')
-    if login_btn.count() == 0:
-        click_by_text(page, "登录", "登录")
-    else:
-        login_btn.first.click()
-
-    logger.info("  [抖音] 等待登录完成（如遇验证码请手动处理）...")
-    try:
-        page.wait_for_url("**/p/**", timeout=120_000)
-    except Exception:
-        logger.warning("  登录等待超时，继续尝试...")
-    time.sleep(10)
-    logger.info(f"  [抖音] 当前URL: {page.url}")
+# def douyin_login(page):
+#     """登录抖音来客平台。"""
+#     logger.info("  [抖音] 打开登录页面...")
+#     page.goto(DOUYIN_LOGIN_URL)
+#     # page.wait_for_load_state("networkidle")
+#     time.sleep(3)
+#
+#     # if "/p/" in page.url:
+#     #     logger.info("  [抖音] 已登录，跳过登录步骤")
+#     #     return
+#
+#     logger.info("  [抖音] 点击「立即登录」...")
+#     page.locator('text="立即登录"').first.click()
+#     time.sleep(3)
+#
+#     logger.info("  [抖音] 切换到「密码登录」...")
+#     page.locator('text="密码登录"').first.click()
+#     time.sleep(2)
+#
+#     logger.info("  [抖音] 输入账号...")
+#     phone_input = page.locator('input[placeholder*="手机"], input[placeholder*="账号"]').first
+#     phone_input.click()
+#     phone_input.fill(DOUYIN_ACCOUNT)
+#     time.sleep(0.5)
+#
+#     logger.info("  [抖音] 输入密码...")
+#     pwd_input = page.locator('input[type="password"]').first
+#     pwd_input.click()
+#     pwd_input.fill(DOUYIN_PASSWORD)
+#     time.sleep(0.5)
+#
+#     logger.info("  [抖音] 勾选「已阅读并同意用户协议和隐私条款」...")
+#     page.evaluate("""
+#         (function() {
+#             var cb = document.querySelector('input.life-core-check-wrapper[type="checkbox"]');
+#             if (cb) { cb.click(); return 'clicked input'; }
+#             var label = document.querySelector('.life-core-checkbox');
+#             if (label) { label.click(); return 'clicked label'; }
+#             return 'not found';
+#         })()
+#     """)
+#     time.sleep(0.5)
+#
+#     logger.info("  [抖音] 点击登录按钮...")
+#     login_btn = page.locator('button:text-is("登录")')
+#     if login_btn.count() == 0:
+#         login_btn = page.locator('button:text-is("登 录")')
+#     if login_btn.count() == 0:
+#         click_by_text(page, "登录", "登录")
+#     else:
+#         login_btn.first.click()
+#
+#     logger.info("  [抖音] 等待登录完成（如遇验证码请手动处理）...")
+#     try:
+#         page.wait_for_url("**/p/**", timeout=120_000)
+#     except Exception:
+#         logger.warning("  登录等待超时，继续尝试...")
+#     time.sleep(10)
+#     logger.info(f"  [抖音] 当前URL: {page.url}")
 
 
 def douyin_set_date(page, target):
@@ -1147,7 +1147,7 @@ def douyin_set_date(page, target):
         except Exception as e:
             if attempt < 2:
                 logger.warning(f"    日期选择器操作失败(重试 {attempt + 1}/3): {e}")
-                time.sleep(3)
+                time.sleep(2)
             else:
                 raise
     time.sleep(1)
@@ -1595,7 +1595,7 @@ def _launch_chrome(port, user_data_dir, headless=False):
         f"--remote-debugging-port={port}",
         f"--user-data-dir={user_data_dir}",
     ])
-    time.sleep(10)
+    time.sleep(8)
     return process
 
 
@@ -1719,7 +1719,7 @@ def run_pospal_tasks(args, target, target_str, date_label, output_dir):
                     logger.info(f"{TAG}  门店 {i + 1}/{len(CUSTOMER_SUMMARY_STORE_CONFIG)}: {ss}")
                     page.goto(CUSTOMER_SUMMARY_URL)
                     page.wait_for_load_state("networkidle", timeout=120_000)
-                    time.sleep(2)
+                    time.sleep(1)
                     select_store_type_consumption(page)
                     select_stores_multi(page, cfg["select_items"])
                     date_dash = target_str.replace(".", "-")
@@ -1747,9 +1747,9 @@ def run_pospal_tasks(args, target, target_str, date_label, output_dir):
                     logger.info(f"{TAG}  统计时间: {result}")
                     page.locator("#btnSearch").click()
                     page.wait_for_load_state("networkidle", timeout=150_000)
-                    time.sleep(3)
-                    click_by_text(page, "导出销售单据", "导出销售单据")
                     time.sleep(2)
+                    click_by_text(page, "导出销售单据", "导出销售单据")
+                    time.sleep(1)
                     with page.expect_download(timeout=180_000) as dl_info:
                         click_by_text(page, "导出", "弹窗导出")
                     download = dl_info.value
@@ -1790,21 +1790,21 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
             def _do_meituan_bill():
                 logger.info(f"{TAG}  [导航] 先进入美团外卖结算账单页...")
                 chrome_page.goto(MEITUAN_DOWNLOAD_URL_PRE)
-                time.sleep(5)
+                time.sleep(3)
 
                 logger.info(f"{TAG}  [导航] 前往美团外卖账单明细页...")
                 chrome_page.goto(MEITUAN_DOWNLOAD_URL)
-                time.sleep(3)
+                time.sleep(2)
 
                 date_input_value = f"{date_label} 日账单"
                 logger.info(f"{TAG}  → 设置日期: {date_input_value}...")
                 date_input = chrome_page.locator(".select-input-wrapper .roo-input")
                 date_input.click()
-                time.sleep(0.5)
+                time.sleep(0.3)
                 date_input.press("Control+a")
                 date_input.type(date_input_value, delay=50)
                 date_input.press("Enter")
-                time.sleep(0.5)
+                time.sleep(0.3)
                 chrome_page.locator("body").click(position={"x": 0, "y": 0})
 
                 logger.info(f"{TAG}  等待数据刷新...")
@@ -1853,7 +1853,7 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
                 logger.info(f"{TAG}  [导航] 前往美团推广账户详情页...")
                 chrome_page.goto(MEITUAN_AD_URL)
                 chrome_page.wait_for_load_state("networkidle", timeout=120_000)
-                time.sleep(3)
+                time.sleep(2)
 
                 logger.info(f"{TAG}  → 逐页查找 {date_label} 的推广消费数据...")
                 ad_found_total = 0
@@ -1873,7 +1873,7 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
                                 document.querySelector('.jump button.btn').click();
                             }})()
                         """)
-                        time.sleep(3)
+                        time.sleep(2)
 
                     page_rows = chrome_page.evaluate("""
                         (function() {
@@ -1928,27 +1928,27 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
                 def _do_eleme():
                     logger.info(f"{TAG}  [导航] 前往饿了么账单页面...")
                     chrome_page.goto(ELEME_BILL_URL)
-                    time.sleep(3)
+                    time.sleep(2)
 
                     logger.info(f"{TAG}  → 设置账单日期: {date_label}...")
                     start_input = chrome_page.locator('input[placeholder="开始日期"]')
                     start_input.click()
-                    time.sleep(0.5)
+                    time.sleep(0.3)
                     start_input.press("Control+a")
                     start_input.type(date_label, delay=50)
                     time.sleep(0.3)
 
                     end_input = chrome_page.locator('input[placeholder="结束日期"]')
                     end_input.click()
-                    time.sleep(0.5)
+                    time.sleep(0.3)
                     end_input.press("Control+a")
                     end_input.type(date_label, delay=50)
                     end_input.press("Enter")
-                    time.sleep(0.5)
+                    time.sleep(0.3)
 
                     logger.info(f"{TAG}  [查询] 点击查询...")
                     chrome_page.locator("button.cook-btn-primary").click()
-                    time.sleep(3)
+                    time.sleep(2)
 
                     logger.info(f"{TAG}  → 抓取饿了么账单数据...")
                     eleme_data = chrome_page.evaluate("""
@@ -2034,7 +2034,7 @@ def _run_jyb_task(args, target, target_str, date_label, output_dir):
             logger.info(f"{TAG}  [导航] 前往美团经营宝每日收益页...")
             jyb_page.goto(MEITUAN_JYB_URL)
             jyb_page.wait_for_load_state("networkidle", timeout=120_000)
-            time.sleep(3)
+            time.sleep(2)
 
             days_diff = (datetime.now().date() - target.date()).days
             logger.info(f"{TAG}  → 设置收益时间: {target.strftime('%Y/%m/%d')} (距今 {days_diff} 天)...")
@@ -2045,7 +2045,7 @@ def _run_jyb_task(args, target, target_str, date_label, output_dir):
                 logger.info(f"{TAG}  已点击快捷按钮: {btn_map[days_diff]}")
             else:
                 jyb_page.locator('.mtd-date-picker input').click()
-                time.sleep(1)
+                time.sleep(0.3)
 
                 current_info = jyb_page.evaluate("""
                     (function() {
@@ -2123,7 +2123,7 @@ def _run_jyb_task(args, target, target_str, date_label, output_dir):
                 logger.info(f"{TAG}  {end_result}")
 
             logger.info(f"{TAG}  等待数据刷新...")
-            time.sleep(3)
+            time.sleep(2)
 
             logger.info(f"{TAG}  → 抓取经营宝收益数据...")
             jyb_rows = jyb_page.evaluate("""
@@ -2205,7 +2205,7 @@ def _run_zhaohang_task(args, target, target_str, date_label, output_dir):
                     logger.info(f"{TAG}  门店 {idx + 1}/{len(ZHAOHANG_STORE_CONFIG)}: {ss}")
                     zh_page.goto(ZHAOHANG_URL)
                     zh_page.wait_for_load_state("networkidle", timeout=120_000)
-                    time.sleep(3)
+                    time.sleep(2)
                     scrape_zhaohang_daily_summary(zh_page, target_str, date_label, cfg, output_dir)
 
                 retry_until_success(_do_zhaohang, desc)
@@ -2232,7 +2232,7 @@ def _run_douyin_task(args, target, target_str, date_label, output_dir):
             logger.info(f"{TAG}  [导航] 前往抖音每日收益页面...")
             dy_page.goto(DOUYIN_DAILY_BENEFITS_URL)
             dy_page.wait_for_selector('.byted-date-picker', timeout=30000)
-            time.sleep(2)
+            # time.sleep(0.3)
 
             douyin_set_date(dy_page, target)
 
@@ -2384,7 +2384,7 @@ def main():
             logger.info(f"{'=' * 55}")
             logger.info(f"  第 {group_round} 轮重试，剩余 {len(pending_groups)} 个任务组: {list(pending_groups.keys())}")
             logger.info(f"{'=' * 55}")
-            time.sleep(10)
+            time.sleep(5)
 
         failed_groups = {}
 
