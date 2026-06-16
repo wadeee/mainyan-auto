@@ -1413,7 +1413,7 @@ def koubei_set_date(page, target):
     start_input.click()
     time.sleep(1)
 
-    page.wait_for_selector('.aamf-picker-dropdown', timeout=5000)
+    page.wait_for_selector('.aamf-picker-dropdown', timeout=20000)
 
     start_input.press("Control+a")
     start_input.type(date_start, delay=30)
@@ -1471,7 +1471,7 @@ def koubei_select_store(page, store_config):
     time.sleep(1)
 
     try:
-        page.wait_for_selector('.aamf-modal', timeout=5000)
+        page.wait_for_selector('.aamf-modal', timeout=20000)
     except Exception:
         logger.warning("  门店选择弹窗未出现，尝试再次点击...")
         store_input.click(force=True)
@@ -1564,7 +1564,7 @@ def _launch_chrome(port, user_data_dir, headless=False):
         f"--remote-debugging-port={port}",
         f"--user-data-dir={user_data_dir}",
     ])
-    time.sleep(5)
+    time.sleep(10)
     return process
 
 
