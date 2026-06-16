@@ -17,7 +17,6 @@ import calendar
 import copy
 import csv
 import json
-import logging
 import logging.handlers
 import re
 import subprocess
@@ -1058,67 +1057,6 @@ def set_vue_date(page, target_str):
         }})()
     """)
     logger.info(f"  日期已设置(fallback): {date_dash}")
-
-
-# def douyin_login(page):
-#     """登录抖音来客平台。"""
-#     logger.info("  [抖音] 打开登录页面...")
-#     page.goto(DOUYIN_LOGIN_URL)
-#     # page.wait_for_load_state("networkidle")
-#     time.sleep(3)
-#
-#     # if "/p/" in page.url:
-#     #     logger.info("  [抖音] 已登录，跳过登录步骤")
-#     #     return
-#
-#     logger.info("  [抖音] 点击「立即登录」...")
-#     page.locator('text="立即登录"').first.click()
-#     time.sleep(3)
-#
-#     logger.info("  [抖音] 切换到「密码登录」...")
-#     page.locator('text="密码登录"').first.click()
-#     time.sleep(2)
-#
-#     logger.info("  [抖音] 输入账号...")
-#     phone_input = page.locator('input[placeholder*="手机"], input[placeholder*="账号"]').first
-#     phone_input.click()
-#     phone_input.fill(DOUYIN_ACCOUNT)
-#     time.sleep(0.5)
-#
-#     logger.info("  [抖音] 输入密码...")
-#     pwd_input = page.locator('input[type="password"]').first
-#     pwd_input.click()
-#     pwd_input.fill(DOUYIN_PASSWORD)
-#     time.sleep(0.5)
-#
-#     logger.info("  [抖音] 勾选「已阅读并同意用户协议和隐私条款」...")
-#     page.evaluate("""
-#         (function() {
-#             var cb = document.querySelector('input.life-core-check-wrapper[type="checkbox"]');
-#             if (cb) { cb.click(); return 'clicked input'; }
-#             var label = document.querySelector('.life-core-checkbox');
-#             if (label) { label.click(); return 'clicked label'; }
-#             return 'not found';
-#         })()
-#     """)
-#     time.sleep(0.5)
-#
-#     logger.info("  [抖音] 点击登录按钮...")
-#     login_btn = page.locator('button:text-is("登录")')
-#     if login_btn.count() == 0:
-#         login_btn = page.locator('button:text-is("登 录")')
-#     if login_btn.count() == 0:
-#         click_by_text(page, "登录", "登录")
-#     else:
-#         login_btn.first.click()
-#
-#     logger.info("  [抖音] 等待登录完成（如遇验证码请手动处理）...")
-#     try:
-#         page.wait_for_url("**/p/**", timeout=120_000)
-#     except Exception:
-#         logger.warning("  登录等待超时，继续尝试...")
-#     time.sleep(10)
-#     logger.info(f"  [抖音] 当前URL: {page.url}")
 
 
 def douyin_set_date(page, target):
