@@ -1389,6 +1389,20 @@ def save_douyin_daily_benefits_csv(data, store_short, date_label, output_dir):
     return csv_file
 
 
+def dismiss_koubei_popup(page):
+    """检查并关闭高德口碑页面可能弹出的「设置账号信息」弹窗。"""
+    try:
+        modal = page.locator('.crmhome-main-modal-wrap')
+        if modal.count() > 0 and modal.is_visible():
+            cancel_btn = modal.locator('button.crmhome-main-btn-default')
+            if cancel_btn.count() > 0:
+                cancel_btn.click()
+                logger.info("  已关闭「设置账号信息」弹窗")
+                time.sleep(0.5)
+    except Exception:
+        pass
+
+
 def koubei_set_date(page, target):
     """在高德口碑账单汇总页面设置日期范围（起止日期相同）。"""
     date_start = target.strftime("%Y-%m-%d") + " 00:00:00"
@@ -1746,12 +1760,12 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
 
             logger.info(f"{TAG}  [导航] 先进入美团外卖结算账单页...")
             chrome_page.goto(MEITUAN_DOWNLOAD_URL_PRE)
-            chrome_page.wait_for_load_state("networkidle", timeout=120_000)
+            # chrome_page.wait_for_load_state("networkidle", timeout=120_000)
             time.sleep(5)
 
             logger.info(f"{TAG}  [导航] 前往美团外卖账单明细页...")
             chrome_page.goto(MEITUAN_DOWNLOAD_URL)
-            chrome_page.wait_for_load_state("networkidle", timeout=120_000)
+            # chrome_page.wait_for_load_state("networkidle", timeout=120_000)
             time.sleep(3)
 
             date_input_value = f"{date_label} 日账单"
@@ -2234,6 +2248,7 @@ def run_shared_chrome_tasks(args, target, target_str, date_label, output_dir):
             logger.info(f"{TAG}  [导航] 前往高德口碑账单汇总页...")
             kb_page.goto(KOUBEI_BILL_URL)
             time.sleep(3)
+            dismiss_koubei_popup(kb_page)
 
             for kb_idx, kb_config in enumerate(KOUBEI_STORE_CONFIG):
                 kb_store_short = kb_config["store_short"]
@@ -2242,6 +2257,7 @@ def run_shared_chrome_tasks(args, target, target_str, date_label, output_dir):
                 if kb_idx > 0:
                     kb_page.goto(KOUBEI_BILL_URL)
                     time.sleep(3)
+                    dismiss_koubei_popup(kb_page)
 
                 koubei_set_date(kb_page, target)
                 koubei_select_query_type(kb_page)
