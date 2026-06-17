@@ -298,24 +298,27 @@ def _create_monthly_from_template(template_file: Path, output_file: Path, store_
     days_in_month = calendar.monthrange(year, month)[1]
 
     ws1 = wb.worksheets[0]
-    ws2 = wb.worksheets[1]
+    ws2 = wb.worksheets[1] if len(wb.worksheets) > 1 else None
 
     old_title_1 = ws1.title
-    old_title_2 = ws2.title
     new_title_1 = old_title_1.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月", f"{year}年{month}月")
-    new_title_2 = old_title_2.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月", f"{year}年{month}月")
     ws1.title = new_title_1
-    ws2.title = new_title_2
+
+    if ws2:
+        old_title_2 = ws2.title
+        new_title_2 = old_title_2.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月", f"{year}年{month}月")
+        ws2.title = new_title_2
 
     a1_val_1 = ws1.cell(row=1, column=1).value
     if a1_val_1 and isinstance(a1_val_1, str):
         ws1.cell(row=1, column=1).value = a1_val_1.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月",
                                                                                                     f"{year}年{month}月")
 
-    a1_val_2 = ws2.cell(row=1, column=1).value
-    if a1_val_2 and isinstance(a1_val_2, str):
-        ws2.cell(row=1, column=1).value = a1_val_2.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月",
-                                                                                                    f"{year}年{month}月")
+    if ws2:
+        a1_val_2 = ws2.cell(row=1, column=1).value
+        if a1_val_2 and isinstance(a1_val_2, str):
+            ws2.cell(row=1, column=1).value = a1_val_2.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月",
+                                                                                                        f"{year}年{month}月")
 
     for day in range(1, 32):
         row_s1 = day + 4
@@ -327,15 +330,16 @@ def _create_monthly_from_template(template_file: Path, output_file: Path, store_
             ws1.cell(row=row_s1, column=2).value = None
             ws1.cell(row=row_s1, column=3).value = None
 
-    for day in range(1, 32):
-        row_s2 = day + 2
-        if day <= days_in_month:
-            dt = datetime(year, month, day)
-            ws2.cell(row=row_s2, column=1).value = f"{year}.{month}.{day}"
-            ws2.cell(row=row_s2, column=2).value = WEEKDAY_NAMES[dt.weekday()]
-        else:
-            ws2.cell(row=row_s2, column=1).value = None
-            ws2.cell(row=row_s2, column=2).value = None
+    if ws2:
+        for day in range(1, 32):
+            row_s2 = day + 2
+            if day <= days_in_month:
+                dt = datetime(year, month, day)
+                ws2.cell(row=row_s2, column=1).value = f"{year}.{month}.{day}"
+                ws2.cell(row=row_s2, column=2).value = WEEKDAY_NAMES[dt.weekday()]
+            else:
+                ws2.cell(row=row_s2, column=1).value = None
+                ws2.cell(row=row_s2, column=2).value = None
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_file)
@@ -448,75 +452,75 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
             ws1.cell(row=row_s1, column=6).value = summary["c16"]
             ws1.cell(row=row_s1, column=7).value = summary["c16"]
         if summary["e4"] is not None:
-            ws1.cell(row=row_s1, column=21).value = summary["e4"]
+            ws1.cell(row=row_s1, column=22).value = summary["e4"]
         if summary["b4_recharge"] is not None:
-            ws1.cell(row=row_s1, column=22).value = summary["b4_recharge"]
+            ws1.cell(row=row_s1, column=23).value = summary["b4_recharge"]
 
     if unionpay:
         if unionpay.get("交易金额") is not None:
-            ws1.cell(row=row_s1, column=9).value = unionpay["交易金额"]
+            ws1.cell(row=row_s1, column=10).value = unionpay["交易金额"]
         if unionpay.get("交易退款金额") is not None:
-            ws1.cell(row=row_s1, column=10).value = unionpay["交易退款金额"]
+            ws1.cell(row=row_s1, column=11).value = unionpay["交易退款金额"]
         if unionpay.get("交易手续费") is not None:
-            ws1.cell(row=row_s1, column=12).value = unionpay["交易手续费"]
+            ws1.cell(row=row_s1, column=13).value = unionpay["交易手续费"]
 
     if customer:
         if customer["principal"] is not None:
-            ws1.cell(row=row_s1, column=25).value = customer["principal"]
+            ws1.cell(row=row_s1, column=26).value = customer["principal"]
         if customer["gift"] is not None:
-            ws1.cell(row=row_s1, column=26).value = customer["gift"]
+            ws1.cell(row=row_s1, column=27).value = customer["gift"]
 
     if meituan:
         if meituan.get("商品总价") is not None:
-            ws1.cell(row=row_s1, column=31).value = abs(meituan["商品总价"])
+            ws1.cell(row=row_s1, column=32).value = abs(meituan["商品总价"])
         if meituan.get("打包费") is not None:
-            ws1.cell(row=row_s1, column=32).value = abs(meituan["打包费"])
+            ws1.cell(row=row_s1, column=33).value = abs(meituan["打包费"])
         if meituan.get("商家对顾客的活动补贴") is not None:
-            ws1.cell(row=row_s1, column=33).value = abs(meituan["商家对顾客的活动补贴"])
+            ws1.cell(row=row_s1, column=34).value = abs(meituan["商家对顾客的活动补贴"])
         if meituan.get("佣金") is not None:
-            ws1.cell(row=row_s1, column=34).value = abs(meituan["佣金"])
+            ws1.cell(row=row_s1, column=35).value = abs(meituan["佣金"])
         if meituan.get("配送服务费") is not None:
-            ws1.cell(row=row_s1, column=35).value = abs(meituan["配送服务费"])
+            ws1.cell(row=row_s1, column=36).value = abs(meituan["配送服务费"])
         if meituan.get("其他类") is not None:
-            ws1.cell(row=row_s1, column=36).value = abs(meituan["其他类"])
+            ws1.cell(row=row_s1, column=37).value = abs(meituan["其他类"])
 
     if ad_promo:
         if ad_promo.get("变化金额") is not None:
-            ws1.cell(row=row_s1, column=30).value = abs(ad_promo["变化金额"])
+            ws1.cell(row=row_s1, column=31).value = abs(ad_promo["变化金额"])
 
     if jyb:
         if jyb.get("售价") is not None:
-            ws1.cell(row=row_s1, column=39).value = jyb["售价"]
+            ws1.cell(row=row_s1, column=40).value = jyb["售价"]
         if jyb.get("促销费") is not None:
-            ws1.cell(row=row_s1, column=40).value = jyb["促销费"]
+            ws1.cell(row=row_s1, column=41).value = jyb["促销费"]
         if jyb.get("服务费") is not None:
-            ws1.cell(row=row_s1, column=41).value = jyb["服务费"]
+            ws1.cell(row=row_s1, column=42).value = jyb["服务费"]
         if jyb.get("其他费用") is not None:
-            ws1.cell(row=row_s1, column=42).value = jyb["其他费用"]
+            ws1.cell(row=row_s1, column=43).value = jyb["其他费用"]
 
     if eleme:
         if eleme.get("订单类") is not None:
-            ws1.cell(row=row_s1, column=45).value = abs(eleme["订单类"])
+            ws1.cell(row=row_s1, column=46).value = abs(eleme["订单类"])
         if eleme.get("其他类") is not None:
-            ws1.cell(row=row_s1, column=46).value = abs(eleme["其他类"])
+            ws1.cell(row=row_s1, column=47).value = abs(eleme["其他类"])
 
     if zhaohang:
         if zhaohang.get("商户实收总计") is not None:
-            ws1.cell(row=row_s1, column=49).value = zhaohang["商户实收总计"]
+            ws1.cell(row=row_s1, column=50).value = zhaohang["商户实收总计"]
 
     if douyin:
         if douyin.get("订单实收") is not None:
-            ws1.cell(row=row_s1, column=51).value = douyin["订单实收"]
+            ws1.cell(row=row_s1, column=52).value = douyin["订单实收"]
         if douyin.get("佣金/服务费支出") is not None:
-            ws1.cell(row=row_s1, column=52).value = douyin["佣金/服务费支出"]
+            ws1.cell(row=row_s1, column=53).value = douyin["佣金/服务费支出"]
 
     if koubei:
         if koubei.get("订单金额") is not None:
-            ws1.cell(row=row_s1, column=55).value = koubei["订单金额"]
+            ws1.cell(row=row_s1, column=56).value = koubei["订单金额"]
         if koubei.get("商家优惠") is not None:
-            ws1.cell(row=row_s1, column=56).value = koubei["商家优惠"]
+            ws1.cell(row=row_s1, column=57).value = koubei["商家优惠"]
         if koubei.get("服务费") is not None:
-            ws1.cell(row=row_s1, column=57).value = koubei["服务费"]
+            ws1.cell(row=row_s1, column=58).value = koubei["服务费"]
 
     wb.save(monthly_file)
     wb.close()
