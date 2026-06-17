@@ -1527,6 +1527,20 @@ def _launch_chrome(port, user_data_dir, headless=False):
     return process
 
 
+def _kill_process_tree(process):
+    try:
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+            timeout=10,
+        )
+    except Exception:
+        try:
+            process.kill()
+        except Exception:
+            pass
+
+
 def _cleanup_chrome(page, browser, process):
     if page:
         try:
@@ -1539,10 +1553,7 @@ def _cleanup_chrome(page, browser, process):
         except Exception:
             pass
     if process:
-        try:
-            process.terminate()
-        except Exception:
-            pass
+        _kill_process_tree(process)
 
 
 # ─── Group A: 银豹系统（Playwright 浏览器）──────────────────────────────────────
@@ -2292,10 +2303,7 @@ def run_shared_chrome_tasks(args, target, target_str, date_label, output_dir):
     finally:
         logger.info("  关闭共享 Chrome (port=9226)...")
         if chrome_process:
-            try:
-                chrome_process.terminate()
-            except Exception:
-                pass
+            _kill_process_tree(chrome_process)
 
 
 # ─── Group D: 格式化写入 ────────────────────────────────────────────────────
