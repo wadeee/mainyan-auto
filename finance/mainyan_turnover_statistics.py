@@ -211,7 +211,13 @@ def _connect_cdp_with_retry(pw, port, max_retries=12, interval=5):
         try:
             browser = pw.chromium.connect_over_cdp(f"http://localhost:{port}")
             context = browser.contexts[0]
+            existing_pages = context.pages[:]
             page = context.new_page()
+            for p in existing_pages:
+                try:
+                    p.close()
+                except Exception:
+                    pass
             page.set_default_timeout(120000)
             page.set_default_navigation_timeout(120000)
             return browser, page
