@@ -272,74 +272,55 @@ def read_business_summary(data_file: Path):
     return result
 
 
-def create_or_open_monthly_file(store, target: datetime, template_file: Path, output_dir: Path):
+def create_or_open_monthly_file(stores, target: datetime, template_file: Path, output_dir: Path):
     year = target.year
     month = target.month
     month_str = f"{year}-{month:02d}"
     month_dir = output_dir / month_str
     month_dir.mkdir(parents=True, exist_ok=True)
 
-    store_name = store["template_name"]
-    output_file = month_dir / f"麦安研营业统计_{store_name}_{month_str}.xlsx"
+    output_file = month_dir / f"麦安研营业统计_{month_str}.xlsx"
 
     if output_file.exists():
         logger.info(f"  月度文件已存在，直接打开: {output_file.name}")
         return output_file, False
 
     logger.info(f"  月度文件不存在，从模板创建: {output_file.name}")
-    _create_monthly_from_template(template_file, output_file, store_name, year, month)
+    _create_monthly_from_template(template_file, output_file, stores, year, month)
     return output_file, True
 
 
-def _create_monthly_from_template(template_file: Path, output_file: Path, store_name: str, year: int, month: int):
+def _create_monthly_from_template(template_file: Path, output_file: Path, stores, year: int, month: int):
     from openpyxl import load_workbook as _lwb
 
     wb = _lwb(template_file)
     days_in_month = calendar.monthrange(year, month)[1]
 
-    ws1 = wb.worksheets[0]
-    ws2 = wb.worksheets[1] if len(wb.worksheets) > 1 else None
+    template_ws = wb.worksheets[0]
+    original_title = template_ws.title
+    for _ in range(len(stores) - 1):
+        wb.copy_worksheet(template_ws)
 
-    old_title_1 = ws1.title
-    new_title_1 = old_title_1.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月", f"{year}年{month}月")
-    ws1.title = new_title_1
+    for idx, store in enumerate(stores):
+        store_name = store["template_name"]
+        ws = wb.worksheets[idx]
 
-    if ws2:
-        old_title_2 = ws2.title
-        new_title_2 = old_title_2.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月", f"{year}年{month}月")
-        ws2.title = new_title_2
+        ws.title = original_title.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月", f"{year}年{month}月")
 
-    a1_val_1 = ws1.cell(row=1, column=1).value
-    if a1_val_1 and isinstance(a1_val_1, str):
-        ws1.cell(row=1, column=1).value = a1_val_1.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月",
-                                                                                                    f"{year}年{month}月")
+        a1_val = ws.cell(row=1, column=1).value
+        if a1_val and isinstance(a1_val, str):
+            ws.cell(row=1, column=1).value = a1_val.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月",
+                                                                                                     f"{year}年{month}月")
 
-    if ws2:
-        a1_val_2 = ws2.cell(row=1, column=1).value
-        if a1_val_2 and isinstance(a1_val_2, str):
-            ws2.cell(row=1, column=1).value = a1_val_2.replace(TEMPLATE_STORE_NAME, store_name).replace("2026年6月",
-                                                                                                        f"{year}年{month}月")
-
-    for day in range(1, 32):
-        row_s1 = day + 4
-        if day <= days_in_month:
-            dt = datetime(year, month, day)
-            ws1.cell(row=row_s1, column=2).value = f"{year}.{month}.{day}"
-            ws1.cell(row=row_s1, column=3).value = WEEKDAY_NAMES[dt.weekday()]
-        else:
-            ws1.cell(row=row_s1, column=2).value = None
-            ws1.cell(row=row_s1, column=3).value = None
-
-    if ws2:
         for day in range(1, 32):
-            row_s2 = day + 2
+            row_s1 = day + 4
             if day <= days_in_month:
                 dt = datetime(year, month, day)
-                ws2.cell(row=row_s2, column=1).value = f"{year}.{month}.{day}"
-                ws2.cell(row=row_s2, column=2).value = WEEKDAY_NAMES[dt.weekday()]
+                ws.cell(row=row_s1, column=2).value = f"{year}.{month}.{day}"
+                ws.cell(row=row_s1, column=3).value = WEEKDAY_NAMES[dt.weekday()]
             else:
-                ws2.cell(row=row_s2, column=1).value = None
-                ws2.cell(row=row_s2, column=2).value = None
+                ws.cell(row=row_s1, column=2).value = None
+                ws.cell(row=row_s1, column=3).value = None
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_file)
@@ -347,7 +328,7 @@ def _create_monthly_from_template(template_file: Path, output_file: Path, store_
     logger.info(f"  已创建月度文件: {output_file}")
 
 
-def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_dir: Path):
+def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_dir: Path, store_index: int = 0):
     from openpyxl import load_workbook as _lwb
 
     day = target.day
@@ -442,7 +423,7 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
             f"  读取口碑 订单金额={koubei.get('订单金额')}, 商家优惠={koubei.get('商家优惠')}, 服务费={koubei.get('服务费')}")
 
     wb = _lwb(monthly_file)
-    ws1 = wb.worksheets[0]
+    ws1 = wb.worksheets[store_index]
 
     row_s1 = day + 4
     if summary:
@@ -2324,13 +2305,13 @@ def run_formatting(target, output_dir, date_label):
     logger.info(f"  格式化数据并写入月度统计表")
     logger.info(f"{'─' * 55}")
 
+    monthly_file, created = create_or_open_monthly_file(
+        STORES, target, TEMPLATE_FILE, OUTPUT_DIR
+    )
+
     for i, store in enumerate(STORES):
         logger.info(f"  门店 {i + 1}/{len(STORES)}: {store['template_name']}")
-
-        monthly_file, created = create_or_open_monthly_file(
-            store, target, TEMPLATE_FILE, OUTPUT_DIR
-        )
-        fill_daily_data(monthly_file, target, store, output_dir)
+        fill_daily_data(monthly_file, target, store, output_dir, store_index=i)
 
     logger.info(f"{'=' * 55}")
     logger.info(f"  麦安研营业统计格式化全部完成！")
