@@ -1868,6 +1868,8 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
                 logger.info(f"{TAG}  → 逐页查找 {date_label} 的推广消费数据...")
                 ad_found_total = 0
                 ad_found = False
+                target_date = datetime.strptime(date_label, "%Y-%m-%d").date()
+                prev_page_key = None
 
                 for ad_page_num in range(1, 100):
                     if ad_page_num > 1:
@@ -1893,9 +1895,10 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
                             for (var i = 0; i < rows.length; i++) {
                                 var tds = rows[i].querySelectorAll('td');
                                 if (tds.length < 4) continue;
+                                var rawDate = tds[0].textContent.trim();
                                 var amountSpan = tds[2].querySelector('span');
                                 items.push({
-                                    date: tds[0].textContent.trim().substring(0, 10),
+                                    rawDate: rawDate,
                                     type: tds[1].textContent.trim(),
                                     amount: (amountSpan ? amountSpan.textContent.trim() : tds[2].textContent.trim())
                                 });
@@ -1908,17 +1911,35 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
                         logger.info(f"{TAG}  第 {ad_page_num} 页无数据，停止搜索")
                         break
 
-                    passed_target = False
+                    cur_page_key = [(r["rawDate"], r["type"], r["amount"]) for r in page_rows]
+                    if cur_page_key == prev_page_key:
+                        logger.info(f"{TAG}  第 {ad_page_num} 页数据与上页相同（已到最后一页），停止搜索")
+                        break
+                    prev_page_key = cur_page_key
+
+                    logger.info(f"{TAG}  第 {ad_page_num} 页: {len(page_rows)} 行, "
+                                f"首行日期={page_rows[0]['rawDate']}, 末行日期={page_rows[-1]['rawDate']}")
+
+                    date_passed = False
                     for row in page_rows:
-                        if row["date"] == date_label and "推广消费" in row["type"]:
+                        row_date_match = re.search(r"(\d{4})\D(\d{1,2})\D(\d{1,2})", row["rawDate"])
+                        if not row_date_match:
+                            continue
+                        row_date = datetime(
+                            int(row_date_match.group(1)),
+                            int(row_date_match.group(2)),
+                            int(row_date_match.group(3)),
+                        ).date()
+                        if row_date == target_date and "推广消费" in row["type"]:
                             amount = float(row["amount"].replace(",", "")) if row["amount"] else 0
                             ad_found_total += amount
                             ad_found = True
                             logger.info(f"{TAG}  第 {ad_page_num} 页命中: {row['type']}, 金额={amount}")
-                        if row["date"] < date_label:
-                            passed_target = True
+                        if row_date < target_date:
+                            date_passed = True
 
-                    if passed_target:
+                    if date_passed:
+                        logger.info(f"{TAG}  已翻过目标日期 {date_label}，停止搜索")
                         break
 
                 if ad_found:
