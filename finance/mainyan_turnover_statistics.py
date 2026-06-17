@@ -182,6 +182,8 @@ DOUYIN_CSV_FIELDS = ["订单实收", "佣金/服务费支出"]
 
 WEEKDAY_NAMES = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
 
+CDP_PORTS = {cfg["port"] for cfg in MEITUAN_STORE_CONFIG} | {9226}
+
 
 # ─── 工具函数 ──────────────────────────────────────────────────────────────────
 
@@ -227,6 +229,86 @@ def _connect_cdp_with_retry(pw, port, max_retries=12, interval=5):
                 raise
             logger.warning(f"[CDP] 连接 port={port} 第 {attempt} 次失败: {e}，{interval}s 后重试...")
             time.sleep(interval)
+
+
+def cleanup_stale_browsers():
+    """在任务开始前清理残留的 Chrome/Chromium 进程，避免端口冲突和 user-data-dir 锁。"""
+    killed_pids = set()
+
+    # 1. 通过 netstat 查找占用 CDP 端口的进程
+    try:
+        output = subprocess.check_output(
+            ["netstat", "-ano"], text=True, errors="replace"
+        )
+        for line in output.splitlines():
+            for port in CDP_PORTS:
+                if f":{port} " in line and "LISTENING" in line:
+                    parts = line.split()
+                    try:
+                        pid = int(parts[-1])
+                    except (ValueError, IndexError):
+                        continue
+                    if pid > 0 and pid not in killed_pids:
+                        logger.info(f"  端口 {port} 被 PID {pid} 占用，终止进程树...")
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(pid)],
+                            capture_output=True, timeout=10,
+                        )
+                        killed_pids.add(pid)
+    except Exception as e:
+        logger.warning(f"  检查端口占用失败: {e}")
+
+    # 2. 查找使用 ChromeDebug 目录的 chrome.exe（可能端口未绑定但锁住了 profile）
+    try:
+        output = subprocess.check_output(
+            ["wmic", "process", "where", "name='chrome.exe'", "get", "processid,commandline"],
+            text=True, errors="replace", timeout=10,
+        )
+        for line in output.splitlines():
+            if "ChromeDebug" in line:
+                parts = line.strip().split()
+                try:
+                    pid = int(parts[-1])
+                except (ValueError, IndexError):
+                    continue
+                if pid > 0 and pid not in killed_pids:
+                    logger.info(f"  发现 ChromeDebug chrome.exe PID {pid}，终止进程树...")
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(pid)],
+                        capture_output=True, timeout=10,
+                    )
+                    killed_pids.add(pid)
+    except Exception as e:
+        logger.warning(f"  检查 ChromeDebug 进程失败: {e}")
+
+    # 3. 清理 Playwright 残留的 chromium.exe
+    try:
+        output = subprocess.check_output(
+            ["tasklist", "/FI", "IMAGENAME eq chromium.exe"],
+            text=True, errors="replace",
+        )
+        for line in output.splitlines():
+            if "chromium.exe" in line.lower():
+                parts = line.split()
+                try:
+                    pid = int(parts[1])
+                except (ValueError, IndexError):
+                    continue
+                if pid not in killed_pids:
+                    logger.info(f"  发现残留 chromium.exe PID {pid}，终止进程树...")
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(pid)],
+                        capture_output=True, timeout=10,
+                    )
+                    killed_pids.add(pid)
+    except Exception as e:
+        logger.warning(f"  检查 chromium.exe 进程失败: {e}")
+
+    if killed_pids:
+        logger.info(f"  已清理 {len(killed_pids)} 个残留进程，等待 3 秒释放资源...")
+        time.sleep(3)
+    else:
+        logger.info(f"  未发现残留浏览器进程")
 
 
 # ─── 格式化合并函数 ──────────────────────────────────────────────────────────
@@ -2343,6 +2425,9 @@ def main():
     except ImportError:
         logger.error("未安装 playwright，请先运行: pip install playwright && playwright install chromium")
         sys.exit(1)
+
+    logger.info("  检查并清理残留浏览器进程...")
+    cleanup_stale_browsers()
 
     output_dir = OUTPUT_DIR / "原始下载" / date_label
     output_dir.mkdir(parents=True, exist_ok=True)
