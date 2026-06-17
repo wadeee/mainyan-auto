@@ -85,10 +85,10 @@ for /f "tokens=*" %%v in ('!PYTHON_CMD! --version 2^>^&1') do set "PY_VER=%%v"
 echo 已找到: !PY_VER!  (命令: !PYTHON_CMD!)
 
 :: ------------------------------------------------
-:: 1.5. 生成 config.env（记录当前机器的绝对路径）
+:: 2. 生成 config.env（记录当前机器的绝对路径）
 :: ------------------------------------------------
 echo.
-echo [1.5/5] 生成 config.env...
+echo [2/5] 生成 config.env...
 
 for /f "tokens=*" %%p in ('!PYTHON_CMD! -c "import sys; print(sys.executable)"') do set "PYTHON_FULL_PATH=%%p"
 set "PW_BROWSERS=%LOCALAPPDATA%\ms-playwright"
@@ -103,20 +103,20 @@ echo   PLAYWRIGHT_BROWSERS_PATH=!PW_BROWSERS!
 echo   已写入: %~dp0config.env
 
 :: ------------------------------------------------
-:: 2. 升级 pip
+:: 3. 升级 pip
 :: ------------------------------------------------
 echo.
-echo [2/5] 升级 pip...
+echo [3/5] 升级 pip...
 !PYTHON_CMD! -m pip install --upgrade pip
 if errorlevel 1 (
     echo pip 升级失败，继续安装依赖...
 )
 
 :: ------------------------------------------------
-:: 3. 安装 requirements.txt 依赖
+:: 4. 安装 requirements.txt 依赖
 :: ------------------------------------------------
 echo.
-echo [3/5] 安装项目依赖 (requirements.txt)...
+echo [4/5] 安装项目依赖 (requirements.txt)...
 !PYTHON_CMD! -m pip install -r "%~dp0requirements.txt"
 if errorlevel 1 (
     echo 依赖安装失败！请检查网络或手动运行:
@@ -126,10 +126,10 @@ if errorlevel 1 (
 )
 
 :: ------------------------------------------------
-:: 4. 安装 Playwright Chromium
+:: 5. 安装 Playwright Chromium
 :: ------------------------------------------------
 echo.
-echo [4/5] 安装 Playwright Chromium 浏览器内核...
+echo [5/5] 安装 Playwright Chromium 浏览器内核...
 !PYTHON_CMD! -m playwright install chromium
 if errorlevel 1 (
     echo Chromium 安装失败！请手动运行:
@@ -148,6 +148,5 @@ echo.
 echo   Python:  !PY_VER!
 echo   依赖:    已安装
 echo   浏览器:  Chromium 已就绪
-echo   服务:    NSSM 已注册
 echo ================================================
 pause
