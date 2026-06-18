@@ -457,10 +457,10 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
     ad_promo_file = daily_download_dir / f"美团外卖推广消费_{store['short']}_{date_label}.csv"
     if not ad_promo_file.exists():
         logger.warning(f"  美团推广消费不存在，跳过填写: {ad_promo_file.name}")
-        ad_promo = None
+        ad_promo_total = None
     else:
-        ad_promo = read_unionpay_bill_csv(ad_promo_file)
-        logger.info(f"  读取美团推广 变化金额 = {ad_promo.get('变化金额')}")
+        ad_promo_total = read_ad_promo_csv(ad_promo_file)
+        logger.info(f"  读取美团推广 变化金额合计 = {ad_promo_total}")
 
     jyb_file = daily_download_dir / f"美团经营宝_每日收益_{store['short']}_{date_label}.csv"
     if not jyb_file.exists():
@@ -547,9 +547,8 @@ def fill_daily_data(monthly_file: Path, target: datetime, store, daily_download_
         if meituan.get("其他类") is not None:
             ws1.cell(row=row_s1, column=37).value = abs(meituan["其他类"])
 
-    if ad_promo:
-        if ad_promo.get("变化金额") is not None:
-            ws1.cell(row=row_s1, column=31).value = abs(ad_promo["变化金额"])
+    if ad_promo_total is not None:
+        ws1.cell(row=row_s1, column=31).value = abs(ad_promo_total)
 
     if jyb:
         if jyb.get("售价") is not None:
@@ -797,6 +796,17 @@ def read_unionpay_bill_csv(csv_file):
         for row in reader:
             result[row["项目"]] = _parse_numeric(row["金额"])
     return result
+
+
+def read_ad_promo_csv(csv_file):
+    total = 0
+    with open(csv_file, "r", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            amount = _parse_numeric(row["变化金额(元)"])
+            if amount is not None:
+                total += amount
+    return total
 
 
 def read_customer_summary(data_file: Path):
@@ -1866,8 +1876,7 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
                 time.sleep(5)
 
                 logger.info(f"{TAG}  → 逐页查找 {date_label} 的推广消费数据...")
-                ad_found_total = 0
-                ad_found = False
+                ad_found_rows = []
                 target_date = datetime.strptime(date_label, "%Y-%m-%d").date()
                 prev_page_key = None
 
@@ -1930,11 +1939,15 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
                             int(row_date_match.group(2)),
                             int(row_date_match.group(3)),
                         ).date()
-                        if row_date == target_date and "推广消费" in row["type"]:
+                        if row_date == target_date:
                             amount = float(row["amount"].replace(",", "")) if row["amount"] else 0
-                            ad_found_total += amount
-                            ad_found = True
-                            logger.info(f"{TAG}  第 {ad_page_num} 页命中: {row['type']}, 金额={amount}")
+                            if amount < 0:
+                                ad_found_rows.append({
+                                    "时间": row["rawDate"],
+                                    "类型": row["type"],
+                                    "变化金额(元)": amount,
+                                })
+                                logger.info(f"{TAG}  第 {ad_page_num} 页命中: {row['type']}, 金额={amount}")
                         if row_date < target_date:
                             date_passed = True
 
@@ -1942,13 +1955,15 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
                         logger.info(f"{TAG}  已翻过目标日期 {date_label}，停止搜索")
                         break
 
-                if ad_found:
-                    logger.info(f"{TAG}  推广消费数据: 变化金额={ad_found_total}")
+                if ad_found_rows:
+                    ad_total = sum(r["变化金额(元)"] for r in ad_found_rows)
+                    logger.info(f"{TAG}  推广消费数据: {len(ad_found_rows)} 条, 合计变化金额={ad_total}")
                     ad_csv_file = output_dir / f"美团外卖推广消费_{mt_store_short}_{date_label}.csv"
                     with open(ad_csv_file, "w", newline="", encoding="utf-8-sig") as f:
                         writer = csv.writer(f)
-                        writer.writerow(["项目", "金额"])
-                        writer.writerow(["变化金额", ad_found_total])
+                        writer.writerow(["时间", "类型", "变化金额(元)"])
+                        for r in ad_found_rows:
+                            writer.writerow([r["时间"], r["类型"], r["变化金额(元)"]])
                     logger.info(f"{TAG}  已保存推广消费CSV: {ad_csv_file.name}")
                 else:
                     logger.warning(f"{TAG}  未找到 {date_label} 的推广消费数据（该日可能无推广消费）")
