@@ -817,15 +817,16 @@ def read_customer_summary(data_file: Path):
 
     total_row = None
     for row in range(ws.max_row, 0, -1):
-        cell_val = ws.cell(row=row, column=1).value
-        if cell_val and "合计" in str(cell_val):
-            total_row = row
+        for col in range(1, min(ws.max_column + 1, 10)):
+            cell_val = ws.cell(row=row, column=col).value
+            if cell_val and "合计" in str(cell_val):
+                total_row = row
+                break
+        if total_row is not None:
             break
 
     if total_row is None:
         total_row = ws.max_row
-        while total_row > 1 and ws.cell(row=total_row, column=1).value is None:
-            total_row -= 1
 
     result = {
         "principal": _parse_numeric(ws.cell(row=total_row, column=6).value),
