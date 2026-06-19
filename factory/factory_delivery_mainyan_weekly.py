@@ -525,7 +525,11 @@ def merge_into_template(data_file, template_file, output_file, monday, sunday):
         logger.warning("没有数据，跳过格式化")
         return
 
-    sorted_products = sorted(products, key=_sort_key_s1)
+    active_products = [
+        p for p in products
+        if any((s.get("数量") or 0) != 0 or (s.get("金额") or 0) != 0 for s in p["stores"].values())
+    ]
+    sorted_products = sorted(active_products, key=_sort_key_s1)
 
     logger.info(f"加载模板: {template_file}")
     wb = load_workbook(template_file, rich_text=True)
@@ -534,7 +538,8 @@ def merge_into_template(data_file, template_file, output_file, monday, sunday):
     fill_s1(wb, sorted_products, store_order, monday, sunday)
 
     logger.info("填充 Sheet 2 (货品销售排行表)...")
-    fill_s2(wb, sorted_products, monday, sunday)
+    s2_sorted = sorted(active_products, key=lambda p: -sum((s.get("金额") or 0) for s in p["stores"].values()))
+    fill_s2(wb, s2_sorted, monday, sunday)
 
     logger.info(f"填充 Sheet 3+ ({len(store_order)} 个门店销售排行)...")
     fill_s3_sheets(wb, sorted_products, store_order, monday, sunday)
