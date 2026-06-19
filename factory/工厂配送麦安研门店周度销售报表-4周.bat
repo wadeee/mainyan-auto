@@ -2,12 +2,12 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 
-for /f %%a in ('powershell -NoProfile -Command "(Get-Date).AddDays(-7).ToString('yyyy-MM-dd')"') do set TARGET_DATE=%%a
+for /f %%a in ('powershell -NoProfile -Command "(Get-Date).AddDays(-28).ToString('yyyy-MM-dd')"') do set TARGET_DATE=%%a
 echo 正在导出 %TARGET_DATE% 工厂配送麦安研门店周度销售报表...
 
 call C:\ProgramData\anaconda3\condabin\conda.bat activate mainyan-auto
 
-python factory_delivery_mainyan_weekly.py --headless --weeks -1 %*
+python factory_delivery_mainyan_weekly.py --headless --weeks -4 %*
 if errorlevel 1 (
     echo.
     echo 任务失败，请查看上方错误信息。
