@@ -1976,46 +1976,59 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
                 def _do_eleme():
                     logger.info(f"{TAG}  [导航] 前往饿了么账单页面...")
                     chrome_page.goto(ELEME_BILL_URL)
-                    # chrome_page.wait_for_load_state("networkidle", timeout=60000)
                     chrome_page.wait_for_selector('input[placeholder="开始日期"]', timeout=30000)
                     time.sleep(3)
 
-                    logger.info(f"{TAG}  → 设置账单日期: {date_label}...")
-                    start_input = chrome_page.locator('input[placeholder="开始日期"]')
-                    start_input.click()
-                    start_input.press("Control+a")
-                    start_input.type(date_label, delay=50)
-                    time.sleep(0.5)
+                    def _eleme_set_date_and_query():
+                        logger.info(f"{TAG}  → 设置账单日期: {date_label}...")
+                        start_input = chrome_page.locator('input[placeholder="开始日期"]')
+                        start_input.click()
+                        start_input.press("Control+a")
+                        start_input.type(date_label, delay=50)
+                        time.sleep(0.5)
 
-                    end_input = chrome_page.locator('input[placeholder="结束日期"]')
-                    end_input.click()
-                    end_input.press("Control+a")
-                    end_input.type(date_label, delay=50)
-                    time.sleep(0.5)
-                    end_input.press("Enter")
+                        end_input = chrome_page.locator('input[placeholder="结束日期"]')
+                        end_input.click()
+                        end_input.press("Control+a")
+                        end_input.type(date_label, delay=50)
+                        time.sleep(0.5)
+                        end_input.press("Enter")
 
-                    logger.info(f"{TAG}  [查询] 点击查询...")
-                    chrome_page.locator("button.cook-btn-primary").click()
-                    chrome_page.wait_for_selector('.ant-table-thead', timeout=30000)
-                    time.sleep(5)
+                        logger.info(f"{TAG}  [查询] 点击查询...")
+                        chrome_page.locator("button.cook-btn-primary").click()
+                        chrome_page.wait_for_selector('.ant-table-thead', timeout=30000)
+                        time.sleep(5)
+
+                    def _eleme_scrape():
+                        return chrome_page.evaluate("""
+                            (function() {
+                                var result = {};
+                                var thead = document.querySelector('.ant-table-thead');
+                                if (!thead) return result;
+                                var rows = thead.querySelectorAll('tr');
+                                if (rows.length < 2) return result;
+                                var ths = rows[1].querySelectorAll('th');
+                                if (ths.length >= 4) {
+                                    result['结算金额'] = parseFloat(ths[1].textContent.trim().replace(/,/g, '')) || 0;
+                                    result['订单类'] = parseFloat(ths[2].textContent.trim().replace(/,/g, '')) || 0;
+                                    result['其他类'] = parseFloat(ths[3].textContent.trim().replace(/,/g, '')) || 0;
+                                }
+                                return result;
+                            })()
+                        """)
+
+                    _eleme_set_date_and_query()
+
+                    has_data = chrome_page.locator('.ant-table-tbody tr.ant-table-row').count() > 0
+                    if not has_data:
+                        logger.info(f"{TAG}  已结算账单中未找到 {date_label} 的数据，切换到待结算账单...")
+                        chrome_page.locator('[data-node-key="TO_BE_SETTLED"] .cook-tabs-tab-btn').click()
+                        chrome_page.wait_for_selector('input[placeholder="开始日期"]', timeout=30000)
+                        time.sleep(3)
+                        _eleme_set_date_and_query()
 
                     logger.info(f"{TAG}  → 抓取饿了么账单数据...")
-                    eleme_data = chrome_page.evaluate("""
-                        (function() {
-                            var result = {};
-                            var thead = document.querySelector('.ant-table-thead');
-                            if (!thead) return result;
-                            var rows = thead.querySelectorAll('tr');
-                            if (rows.length < 2) return result;
-                            var ths = rows[1].querySelectorAll('th');
-                            if (ths.length >= 4) {
-                                result['结算金额'] = parseFloat(ths[1].textContent.trim().replace(/,/g, '')) || 0;
-                                result['订单类'] = parseFloat(ths[2].textContent.trim().replace(/,/g, '')) || 0;
-                                result['其他类'] = parseFloat(ths[3].textContent.trim().replace(/,/g, '')) || 0;
-                            }
-                            return result;
-                        })()
-                    """)
+                    eleme_data = _eleme_scrape()
                     logger.info(f"{TAG}  抓取数据: {json.dumps(eleme_data, ensure_ascii=False)}")
 
                     eleme_csv_fields = ["结算金额", "订单类", "其他类"]
