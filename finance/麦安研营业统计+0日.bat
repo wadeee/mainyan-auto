@@ -2,12 +2,16 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 
-for /f %%a in ('powershell -NoProfile -Command "(Get-Date).AddDays(0).ToString('yyyy-MM-dd')"') do set TARGET_DATE=%%a
-echo 正在导出 %TARGET_DATE% 兔司家门店订购商品统计...
+:: 从文件名提取天数（如 -1日 → -1, +1日 → +1）
+set "BAT_NAME=%~n0"
+for /f %%a in ('powershell -NoProfile -Command "if ('%BAT_NAME%' -match '([+-]\d+)日$') { $matches[1] }"') do set DAYS=%%a
 
-call C:\ProgramData\anaconda3\condabin\conda.bat activate mainyan-auto
+for /f %%a in ('powershell -NoProfile -Command "(Get-Date).AddDays(%DAYS%).ToString('yyyy-MM-dd')"') do set TARGET_DATE=%%a
+echo 正在导出 %TARGET_DATE% 麦安研营业统计...
 
-python mainyan_turnover_statistics.py --headless --days 0 %*
+for /f "tokens=1,* delims==" %%a in (config.env) do if "%%a"=="PYTHON_PATH" set "PYTHON_PATH=%%b"
+
+"%PYTHON_PATH%" mainyan_turnover_statistics.py --headless --days %DAYS% %*
 if errorlevel 1 (
     echo.
     echo 任务失败，请查看上方错误信息。
