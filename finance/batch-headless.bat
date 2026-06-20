@@ -20,3 +20,5 @@ python mainyan_turnover_statistics.py --headless --date 2026.06.13 %*
 python mainyan_turnover_statistics.py --headless --date 2026.06.14 %*
 python mainyan_turnover_statistics.py --headless --date 2026.06.15 %*
 python mainyan_turnover_statistics.py --headless --date 2026.06.16 %*
+python mainyan_turnover_statistics.py --headless --date 2026.06.17 %*
+python mainyan_turnover_statistics.py --headless --date 2026.06.18 %*
