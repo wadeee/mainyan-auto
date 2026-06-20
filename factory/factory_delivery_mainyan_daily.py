@@ -75,15 +75,16 @@ TARGET_CATEGORIES = [
     "蛋糕及面包成品及饼干类",
 ]
 
-CATEGORY_ORDER = [
+CATEGORY_SORT_ORDER = [
     "冷冻面团",
-    "蛋糕及面包成品及饼干类",
-    "慕斯+饼干+饮品+其他",
-    "原料铺料",
-    "包材耗材",
-    "工衣模具",
-    "配送费",
+    "成品面包类", "饼干类",
+    "蛋糕类",
+    "热销类", "慕斯类/外", "冷冻肉类", "冷冻馅料类", "冷藏馅料类", "油脂类", "粉类", "糖类", "常温馅料类",
+    "干果类", "饼干类/外", "饮品类/外", "其他/外", "专版包材类", "公版包材类", "工衣工帽围裙", "模具",
+    "保洁用品", "配送费",
 ]
+
+_CATEGORY_PRIORITY = {cat: idx for idx, cat in enumerate(CATEGORY_SORT_ORDER)}
 
 HEADER_ROW = 1
 TOTALS_ROW = 2
@@ -223,14 +224,9 @@ def read_downloaded_data(data_file):
 
 
 def _sort_key(product):
-    """按商品大类顺序排序，同类内按合计金额降序。"""
-    cat = product.get("商品大类", "")
-    try:
-        cat_idx = CATEGORY_ORDER.index(cat)
-    except ValueError:
-        cat_idx = len(CATEGORY_ORDER)
-    total_amt = sum((s.get("金额") or 0) for s in product.get("stores", {}).values())
-    return (cat_idx, -total_amt)
+    """按商品分类在 EXPORT_CATEGORY_MAP 中的顺序排序，同分类内保持原始顺序。"""
+    cat = product.get("商品分类", "")
+    return _CATEGORY_PRIORITY.get(cat, len(CATEGORY_SORT_ORDER))
 
 
 # ─── 填充模板 ─────────────────────────────────────────────────────────────────
