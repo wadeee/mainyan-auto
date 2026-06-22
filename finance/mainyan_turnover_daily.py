@@ -1,7 +1,7 @@
 """
 麦安研营业每日报表 - 自动化脚本
 =====================================
-依赖：pip install playwright openpyxl && playwright install chromium
+依赖：pip install playwright openpyxl xlrd && playwright install chromium
 
 自动登录银豹后台，导出各类报表数据并生成麦安研营业每日报表。
 
@@ -23,6 +23,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import xlrd
 from openpyxl import load_workbook
 
 # ─── 日志配置 ───────────────────────────────────────────────────────────────────
@@ -405,7 +406,7 @@ def download_discard_history(page, target_str, date_label, output_dir):
     logger.info(f"{TAG} 导出...")
     download = export_with_popup(page, "btnExportDiscardInventoryHistory")
 
-    dest = output_dir / f"商品报损记录_{date_label}.xlsx"
+    dest = output_dir / f"商品报损记录_{date_label}.xls"
     download.save_as(dest)
     logger.info(f"{TAG} 已保存: {dest.name}")
     return dest
@@ -434,7 +435,7 @@ def download_discard_count(page, target_str, date_label, store, reason, output_d
     logger.info(f"{TAG} 导出...")
     download = export_with_popup(page, "btnExport")
 
-    dest = output_dir / f"商品报损统计_{abbr}_{reason}_{date_label}.xlsx"
+    dest = output_dir / f"商品报损统计_{abbr}_{reason}_{date_label}.xls"
     download.save_as(dest)
     logger.info(f"{TAG} 已保存: {dest.name}")
     return dest
@@ -526,7 +527,7 @@ def download_sale_analysis(page, target_str, date_label, store, output_dir):
             with page.expect_download(timeout=60_000) as dl_info:
                 page.locator("#saleAnalysisTableDiv .option.export").click()
             download = dl_info.value
-            dest = output_dir / f"销售趋势分析_{abbr}_{sub}_{date_label}.xlsx"
+            dest = output_dir / f"销售趋势分析_{abbr}_{sub}_{date_label}.xls"
             download.save_as(dest)
             logger.info(f"{TAG} 已保存: {dest.name}")
         except Exception as e:
@@ -665,52 +666,50 @@ def download_delivery_comparison(page, target_str, date_label, output_dir):
 
 
 def read_discard_history_data(file_path, store_short, reason):
-    """读取商品报损记录，按门店+报损原因筛选，返回报损金额合计。"""
+    """读取商品报损记录（xls），按门店+报损原因筛选，返回报损金额合计。"""
     if not file_path.exists():
         return 0
-    wb = load_workbook(file_path, data_only=True)
-    ws = wb.active
+    wb = xlrd.open_workbook(str(file_path))
+    ws = wb.sheet_by_index(0)
 
     total = 0
-    for r in range(2, ws.max_row + 1):
-        store_name = str(ws.cell(row=r, column=3).value or "").strip()
-        discard_reason = str(ws.cell(row=r, column=6).value or "").strip()
-        amount = _parse_numeric(ws.cell(row=r, column=4).value)
+    for r in range(1, ws.nrows):
+        store_name = str(ws.cell_value(r, 2) or "").strip()   # C列 (0-indexed=2)
+        discard_reason = str(ws.cell_value(r, 5) or "").strip()  # F列 (0-indexed=5)
+        amount = _parse_numeric(ws.cell_value(r, 3))           # D列 (0-indexed=3)
 
         if _match_store(store_short, store_name) and discard_reason == reason:
             if amount is not None and isinstance(amount, (int, float)):
                 total += amount
 
-    wb.close()
     return round(total, 2)
 
 
 def read_discard_count_data(file_paths):
-    """读取商品报损统计文件（报废+过期合并），按报损金额降序返回商品列表。"""
+    """读取商品报损统计文件（xls，报废+过期合并），按报损金额降序返回商品列表。"""
     products = []
 
     for fp in file_paths:
         if not fp.exists():
             continue
-        wb = load_workbook(fp, data_only=True)
-        ws = wb.active
+        wb = xlrd.open_workbook(str(fp))
+        ws = wb.sheet_by_index(0)
 
-        for r in range(2, ws.max_row + 1):
-            name = ws.cell(row=r, column=1).value
+        for r in range(1, ws.nrows):
+            name = ws.cell_value(r, 0)  # A列 (0-indexed=0)
             if name is None:
                 continue
             name = str(name).strip()
             if not name or name == "合计":
                 continue
-            qty = _parse_numeric(ws.cell(row=r, column=6).value)
-            amount = _parse_numeric(ws.cell(row=r, column=8).value)
+            qty = _parse_numeric(ws.cell_value(r, 5))     # F列 (0-indexed=5)
+            amount = _parse_numeric(ws.cell_value(r, 7))   # H列 (0-indexed=7)
             if amount is not None and isinstance(amount, (int, float)) and amount != 0:
                 products.append({
                     "name": name,
                     "qty": qty if isinstance(qty, (int, float)) else 0,
                     "amount": amount,
                 })
-        wb.close()
 
     products.sort(key=lambda x: abs(x["amount"]), reverse=True)
     return products
@@ -936,7 +935,7 @@ def fill_daily_sheet(monthly_file, target, download_dir, sale_analysis_data):
     ws = wb.worksheets[sheet_idx]
     logger.info(f"  填充第 {day} 天数据到 sheet: {ws.title}")
 
-    discard_history_file = download_dir / f"商品报损记录_{date_label}.xlsx"
+    discard_history_file = download_dir / f"商品报损记录_{date_label}.xls"
     delivery_file = download_dir / f"仓库配送商品门店对比表_{date_label}.xlsx"
     delivery_totals = read_delivery_store_totals(delivery_file)
 
@@ -986,7 +985,7 @@ def fill_daily_sheet(monthly_file, target, download_dir, sale_analysis_data):
 
         # ── B24~D28: 商品报损统计 Top5（报废+过期合并） ──
         discard_files = [
-            download_dir / f"商品报损统计_{abbr}_{reason}_{date_label}.xlsx"
+            download_dir / f"商品报损统计_{abbr}_{reason}_{date_label}.xls"
             for reason in DISCARD_REASONS
         ]
         damage_products = read_discard_count_data(discard_files)
