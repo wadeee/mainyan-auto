@@ -470,6 +470,7 @@ def download_discard_history(page, target_str, date_label, output_dir):
 
     logger.info(f"{TAG} 导出...")
     download = export_with_popup(page, "btnExportDiscardInventoryHistory")
+    time.sleep(3)
 
     dest = output_dir / f"商品报损记录_{date_label}.xls"
     download.save_as(dest)
@@ -981,12 +982,12 @@ def _set_week_day_cell(ws, row, col, weekday_num):
         font_size = existing_font.size or 11
 
         ws.cell(row=row, column=col).value = CellRichText(
-            TextBlock(InlineFont(rFont=font_name, sz=font_size), "本周"),
+            TextBlock(InlineFont(rFont=font_name, sz=font_size), "本周第"),
             TextBlock(InlineFont(rFont=font_name, sz=font_size, color="FF0000"), str(weekday_num)),
             TextBlock(InlineFont(rFont=font_name, sz=font_size), "天"),
         )
     except Exception:
-        ws.cell(row=row, column=col).value = f"本周{weekday_num}天"
+        ws.cell(row=row, column=col).value = f"本周第{weekday_num}天"
 
 
 def fill_daily_sheet(monthly_file, target, download_dir, sale_analysis_data):
@@ -1016,7 +1017,7 @@ def fill_daily_sheet(monthly_file, target, download_dir, sale_analysis_data):
         # ── B3: 日期 ──
         ws.cell(row=3, column=offset + 2).value = date_label
 
-        # ── F3: 本周X天 ──
+        # ── F3: 本周第X天 ──
         weekday_num = target.isoweekday()
         _set_week_day_cell(ws, row=3, col=offset + 6, weekday_num=weekday_num)
 
