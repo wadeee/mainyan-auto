@@ -727,6 +727,53 @@ def select_store(page, store_full_name: str):
     page.wait_for_selector("#ddl_subUsers .selectBox", state="hidden", timeout=5000)
 
 
+def select_stores_ddl(page, store_names):
+    """从自定义 div 下拉 (#ddl_subUsers) 中选择多个门店。"""
+    logger.info(f"  → 选择门店: {store_names}")
+
+    dropdown = page.locator("#ddl_subUsers")
+    dropdown.click()
+    page.wait_for_selector("#ddl_subUsers .selectBox", state="visible", timeout=10000)
+
+    page.evaluate("""
+        (function() {
+            var lis = document.querySelectorAll('#ddl_subUsers .selectBox li');
+            lis.forEach(function(li) {
+                if (li.classList.contains('on')) li.click();
+            });
+        })()
+    """)
+
+    for name in store_names:
+        target_li = page.locator(f"#ddl_subUsers .selectBox li[title='{name}']")
+        if target_li.count() > 0:
+            target_li.click()
+            logger.info(f"    门店已选中: {name}")
+        else:
+            click_result = page.evaluate(f"""
+                (function() {{
+                    var lis = document.querySelectorAll('#ddl_subUsers .selectBox li');
+                    for (var i = 0; i < lis.length; i++) {{
+                        var t = lis[i].textContent.replace(/\\u00a0/g, ' ').trim();
+                        if (t === '{name}') {{
+                            lis[i].click();
+                            return 'clicked: ' + t;
+                        }}
+                    }}
+                    var names = [];
+                    for (var i = 0; i < lis.length; i++) names.push(lis[i].textContent.replace(/\\u00a0/g, ' ').trim());
+                    return 'not found in: ' + names.join(', ');
+                }})()
+            """)
+            logger.info(f"    模糊匹配: {click_result}")
+
+    close_btn = page.locator("#ddl_subUsers .bottomBar .btnGrey14")
+    if close_btn.count() > 0:
+        close_btn.click()
+        logger.info("    下拉框已关闭")
+    page.wait_for_selector("#ddl_subUsers .selectBox", state="hidden", timeout=5000)
+
+
 def click_export(page):
     """点击导出按钮。"""
     result = page.evaluate("""
@@ -1668,14 +1715,15 @@ def run_pospal_tasks(args, target, target_str, date_label, output_dir):
             logger.info(f"{TAG}  下载营业概况日度统计")
             logger.info(f"{TAG} {'─' * 45}")
 
-            for i, store in enumerate(STORES):
-                desc = f"营业概况-{store['short']}"
+            for i, cs_config in enumerate(CUSTOMER_SUMMARY_STORE_CONFIG):
+                store_short = cs_config["store_short"]
+                desc = f"营业概况-{store_short}"
 
-                def _do_business_summary(s=store):
-                    logger.info(f"{TAG}  门店 {i + 1}/{len(STORES)}: {s['short']}")
+                def _do_business_summary(cfg=cs_config, ss=store_short):
+                    logger.info(f"{TAG}  门店 {i + 1}/{len(CUSTOMER_SUMMARY_STORE_CONFIG)}: {ss}")
                     page.goto(BUSINESS_SUMMARY_URL)
                     page.wait_for_load_state("networkidle", timeout=120_000)
-                    select_store(page, s["full"])
+                    select_stores_ddl(page, cfg["select_items"])
                     set_date(page, "开始日期", f"{target_str} 00:00")
                     set_date(page, "结束日期", f"{target_str} 23:59")
                     click_by_text(page, "查询", "查询")
@@ -1684,7 +1732,7 @@ def run_pospal_tasks(args, target, target_str, date_label, output_dir):
                     with page.expect_download(timeout=180_000) as dl_info:
                         click_export(page)
                     download = dl_info.value
-                    dest = output_dir / f"营业概况_{s['short']}_{date_label}.xlsx"
+                    dest = output_dir / f"营业概况_{ss}_{date_label}.xlsx"
                     download.save_as(dest)
                     logger.info(f"{TAG}  已保存: {dest.name}")
 
