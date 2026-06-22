@@ -25,6 +25,8 @@ from pathlib import Path
 
 import xlrd
 from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
+from openpyxl.utils import column_index_from_string
 
 # ─── 日志配置 ───────────────────────────────────────────────────────────────────
 LOG_DIR = Path(__file__).resolve().parent / "log"
@@ -181,6 +183,65 @@ def _sub_label(item_name):
     return item_name.split(" - ")[-1] if " - " in item_name else item_name
 
 
+def _eval_cell(ws, row, col, cache=None):
+    """递归计算单元格值，支持简单加减法公式。"""
+    if cache is None:
+        cache = {}
+    key = (row, col)
+    if key in cache:
+        return cache[key]
+
+    val = ws.cell(row=row, column=col).value
+    if val is None:
+        cache[key] = 0
+        return 0
+    if isinstance(val, (int, float)):
+        cache[key] = val
+        return val
+    if isinstance(val, str) and val.startswith("="):
+        result = _eval_formula(ws, val, cache)
+        cache[key] = result
+        return result
+    try:
+        result = float(str(val).strip().replace(",", ""))
+        cache[key] = result
+        return result
+    except (ValueError, TypeError):
+        cache[key] = 0
+        return 0
+
+
+def _eval_formula(ws, formula, cache):
+    """解析并计算仅含 +/- 和单元格引用的公式。"""
+    expr = formula.lstrip("=").strip()
+    tokens = re.split(r"(?=[+-])", expr)
+
+    total = 0.0
+    for token in tokens:
+        token = token.strip()
+        if not token:
+            continue
+        sign = 1
+        if token.startswith("-"):
+            sign = -1
+            token = token[1:].strip()
+        elif token.startswith("+"):
+            token = token[1:].strip()
+
+        m = re.match(r"^([A-Z]+)(\d+)$", token)
+        if m:
+            col = column_index_from_string(m.group(1))
+            row = int(m.group(2))
+            total += sign * _eval_cell(ws, row, col, cache)
+        else:
+            try:
+                total += sign * float(token)
+            except ValueError:
+                pass
+
+    return total
+
+
 # ─── 浏览器自动化函数 ────────────────────────────────────────────────────────────
 
 
@@ -220,6 +281,7 @@ def login(page):
     logger.info("[1/4] 打开登录页面...")
     page.goto(LOGIN_URL)
     page.wait_for_load_state("networkidle")
+    time.sleep(2)
 
     logger.info("[2/4] 切换到工号登录模式...")
     page.evaluate("""
@@ -271,6 +333,7 @@ def login(page):
     logger.info("[4/4] 点击登录按钮...")
     click_by_text(page, "登 录", "登录")
     page.wait_for_load_state("networkidle", timeout=120_000)
+    time.sleep(2)
 
 
 def select_stores_multi(page, store_names, dropdown_id="ddl_subUsers"):
@@ -393,10 +456,12 @@ def download_discard_history(page, target_str, date_label, output_dir):
     logger.info(f"{TAG} 前往页面...")
     page.goto(DISCARD_HISTORY_URL)
     page.wait_for_load_state("networkidle", timeout=120_000)
+    time.sleep(2)
 
     logger.info(f"{TAG} 设置时间: {target_str}...")
     set_date(page, "开始日期", f"{target_str} 00:00")
     set_date(page, "结束日期", f"{target_str} 23:59")
+    time.sleep(1)
 
     logger.info(f"{TAG} 查询...")
     click_by_text(page, "查询", "查询")
@@ -419,6 +484,7 @@ def download_discard_count(page, target_str, date_label, store, reason, output_d
     logger.info(f"{TAG} 前往页面...")
     page.goto(DISCARD_COUNT_URL)
     page.wait_for_load_state("networkidle", timeout=120_000)
+    time.sleep(2)
 
     select_stores_multi(page, store["multi_select_items"])
     select_single_option(page, "ddl_reasons", reason)
@@ -448,6 +514,7 @@ def download_product_sale(page, target_str, date_label, store, output_dir):
     logger.info(f"{TAG} 前往页面...")
     page.goto(PRODUCT_SALE_URL)
     page.wait_for_load_state("networkidle", timeout=120_000)
+    time.sleep(2)
 
     select_stores_multi(page, store["multi_select_items"])
 
@@ -482,6 +549,7 @@ def download_sale_analysis(page, target_str, date_label, store, output_dir):
         logger.info(f"{TAG} 前往页面...")
         page.goto(SALE_ANALYSIS_URL)
         page.wait_for_load_state("networkidle", timeout=120_000)
+        time.sleep(2)
 
         select_single_option(page, "ddl_subUsers", item_name)
         select_single_option(page, "ddl_countType", "按小时")
@@ -542,6 +610,7 @@ def download_delivery_comparison(page, target_str, date_label, output_dir):
     logger.info(f"{TAG} 前往页面...")
     page.goto(DELIVERY_REPORT_URL)
     page.wait_for_load_state("networkidle", timeout=120_000)
+    time.sleep(2)
 
     logger.info(f"{TAG} 设置时间: {target_str}...")
     set_date(page, "开始日期", f"{target_str} 00:00")
@@ -674,9 +743,9 @@ def read_discard_history_data(file_path, store_short, reason):
 
     total = 0
     for r in range(1, ws.nrows):
-        store_name = str(ws.cell_value(r, 2) or "").strip()   # C列 (0-indexed=2)
+        store_name = str(ws.cell_value(r, 2) or "").strip()  # C列 (0-indexed=2)
         discard_reason = str(ws.cell_value(r, 5) or "").strip()  # F列 (0-indexed=5)
-        amount = _parse_numeric(ws.cell_value(r, 3))           # D列 (0-indexed=3)
+        amount = _parse_numeric(ws.cell_value(r, 3))  # D列 (0-indexed=3)
 
         if _match_store(store_short, store_name) and discard_reason == reason:
             if amount is not None and isinstance(amount, (int, float)):
@@ -700,10 +769,10 @@ def read_discard_count_data(file_paths):
             if name is None:
                 continue
             name = str(name).strip()
-            if not name or name == "合计":
+            if not name or name in ("合计", "总计"):
                 continue
-            qty = _parse_numeric(ws.cell_value(r, 5))     # F列 (0-indexed=5)
-            amount = _parse_numeric(ws.cell_value(r, 7))   # H列 (0-indexed=7)
+            qty = _parse_numeric(ws.cell_value(r, 5))  # F列 (0-indexed=5)
+            amount = _parse_numeric(ws.cell_value(r, 7))  # H列 (0-indexed=7)
             if amount is not None and isinstance(amount, (int, float)) and amount != 0:
                 products.append({
                     "name": name,
@@ -729,7 +798,7 @@ def read_product_sale_data(file_path):
         if name is None:
             continue
         name = str(name).strip()
-        if not name or name == "合计":
+        if not name or name in ("合计", "总计"):
             continue
         category = str(ws.cell(row=r, column=6).value or "").strip()
         amount = _parse_numeric(ws.cell(row=r, column=10).value)
@@ -803,7 +872,7 @@ def read_delivery_store_totals(data_file):
 
 
 def read_stats_value(target, store, column):
-    """读取麦安研营业统计指定列的数值。"""
+    """读取麦安研营业统计指定列的数值（支持公式递归计算）。"""
     month_str = f"{target.year}-{target.month:02d}"
     stats_file = STATS_DIR / month_str / f"麦安研营业统计_{month_str}.xlsx"
 
@@ -811,7 +880,7 @@ def read_stats_value(target, store, column):
         logger.warning(f"  营业统计文件不存在: {stats_file}")
         return None
 
-    wb = load_workbook(stats_file, data_only=True)
+    wb = load_workbook(stats_file, data_only=False)
     if store["stats_ws_index"] >= len(wb.worksheets):
         logger.warning(f"  营业统计文件sheet不足: index={store['stats_ws_index']}")
         wb.close()
@@ -819,13 +888,13 @@ def read_stats_value(target, store, column):
 
     ws = wb.worksheets[store["stats_ws_index"]]
     row = target.day + 4
-    val = _parse_numeric(ws.cell(row=row, column=column).value)
+    val = _eval_cell(ws, row, column)
     wb.close()
-    return val
+    return round(val, 2) if val else None
 
 
 def read_stats_bi_week_sum(target, store):
-    """读取营业统计 BI 列本周（周一到目标日期）的累计值。"""
+    """读取营业统计 BI 列本周（周一到目标日期）的累计值（支持公式递归计算）。"""
     month_str = f"{target.year}-{target.month:02d}"
     stats_file = STATS_DIR / month_str / f"麦安研营业统计_{month_str}.xlsx"
 
@@ -834,21 +903,21 @@ def read_stats_bi_week_sum(target, store):
 
     monday = target - timedelta(days=target.weekday())
 
-    wb = load_workbook(stats_file, data_only=True)
+    wb = load_workbook(stats_file, data_only=False)
     if store["stats_ws_index"] >= len(wb.worksheets):
         wb.close()
         return None
 
     ws = wb.worksheets[store["stats_ws_index"]]
+    cache = {}
 
     total = 0
     current = monday
     while current <= target:
         if current.month == target.month and current.year == target.year:
             row = current.day + 4
-            val = _parse_numeric(ws.cell(row=row, column=61).value)
-            if val is not None and isinstance(val, (int, float)):
-                total += val
+            val = _eval_cell(ws, row, 61, cache)
+            total += val
         current += timedelta(days=1)
 
     wb.close()
@@ -969,19 +1038,21 @@ def fill_daily_sheet(monthly_file, target, download_dir, sale_analysis_data):
             ws.cell(row=14, column=offset + 2).value = delivery_amount
             logger.info(f"      B14 (配送): {delivery_amount}")
 
-        # ── B18: 商品报损记录 "报废" 合计 ──
+        # ── B18: 商品报损记录 "试吃" 合计 ──
         if discard_history_file.exists():
-            b18_val = read_discard_history_data(discard_history_file, store["store_short"], "报废")
+            b18_val = read_discard_history_data(discard_history_file, store["store_short"], "试吃")
             if b18_val:
                 ws.cell(row=18, column=offset + 2).value = b18_val
-                logger.info(f"      B18 (报废): {b18_val}")
+                logger.info(f"      B18 (试吃): {b18_val}")
 
-        # ── B19: 商品报损记录 "试吃" 合计 ──
+        # ── B19: 商品报损记录 "报废"+"过期" 合计 ──
         if discard_history_file.exists():
-            b19_val = read_discard_history_data(discard_history_file, store["store_short"], "试吃")
+            b19_baofei = read_discard_history_data(discard_history_file, store["store_short"], "报废")
+            b19_guoqi = read_discard_history_data(discard_history_file, store["store_short"], "过期")
+            b19_val = round(b19_baofei + b19_guoqi, 2)
             if b19_val:
                 ws.cell(row=19, column=offset + 2).value = b19_val
-                logger.info(f"      B19 (试吃): {b19_val}")
+                logger.info(f"      B19 (报废+过期): {b19_val}")
 
         # ── B24~D28: 商品报损统计 Top5（报废+过期合并） ──
         discard_files = [
@@ -1020,11 +1091,20 @@ def fill_daily_sheet(monthly_file, target, download_dir, sale_analysis_data):
         # ── G23~G28: 销售趋势分析小时数据 ──
         hourly_data = sale_analysis_data.get(store["store_short"], {})
         filled_hours = 0
+        max_val = None
+        max_row = None
         for hour, row in HOUR_ROW_MAP.items():
             if hour in hourly_data:
-                ws.cell(row=row, column=offset + 7).value = hourly_data[hour]
+                val = hourly_data[hour]
+                ws.cell(row=row, column=offset + 7).value = val
                 filled_hours += 1
-        logger.info(f"      G23-G28: {filled_hours} 个时段")
+                if max_val is None or val > max_val:
+                    max_val = val
+                    max_row = row
+        if max_row is not None:
+            red_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+            ws.cell(row=max_row, column=offset + 7).fill = red_fill
+        logger.info(f"      G23-G28: {filled_hours} 个时段, 最大值行={max_row}")
 
     wb.save(monthly_file)
     wb.close()
