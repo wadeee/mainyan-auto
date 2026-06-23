@@ -489,10 +489,12 @@ def download_discard_count(page, target_str, date_label, store, reason, output_d
 
     select_stores_multi(page, store["multi_select_items"])
     select_single_option(page, "ddl_reasons", reason)
+    time.sleep(2)
 
     logger.info(f"{TAG} 设置时间: {target_str}...")
     set_date(page, "开始日期", f"{target_str} 00:00")
     set_date(page, "结束日期", f"{target_str} 23:59")
+    time.sleep(2)
 
     logger.info(f"{TAG} 查询...")
     click_by_text(page, "查询", "查询")
