@@ -71,6 +71,7 @@ STORES = [
         "single_select_items": ["1 - 麦安研", "3 - 麦安研（东站宝泰店）"],
         "stats_ws_index": 0,
         "col_offset": 0,
+        "hour_row_map": {11: 23, 12: 24, 13: 25, 16: 26, 17: 27, 18: 28},
     },
     {
         "store_short": "龙江店",
@@ -79,6 +80,7 @@ STORES = [
         "single_select_items": ["5 - 麦安研（顺德龙江店）"],
         "stats_ws_index": 1,
         "col_offset": 10,
+        "hour_row_map": {17: 23, 18: 24, 19: 25, 20: 26, 21: 27, 22: 28},
     },
     {
         "store_short": "杏坛店",
@@ -87,6 +89,7 @@ STORES = [
         "single_select_items": ["2 - 麦安研（顺德杏坛店）"],
         "stats_ws_index": 2,
         "col_offset": 20,
+        "hour_row_map": {17: 23, 18: 24, 19: 25, 20: 26, 21: 27, 22: 28},
     },
 ]
 
@@ -111,7 +114,6 @@ DELIVERY_STORE_NAME_MAP = {
     "中央工厂冷加工间": "冷加工间",
 }
 
-HOUR_ROW_MAP = {11: 23, 12: 24, 13: 25, 16: 26, 17: 27, 18: 28}
 
 
 # ─── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -796,7 +798,7 @@ def read_product_sale_data(file_path):
     ws = wb.active
 
     rows = []
-    for r in range(2, ws.max_row + 1):
+    for r in range(2, ws.max_row):
         name = ws.cell(row=r, column=1).value
         if name is None:
             continue
@@ -1093,10 +1095,11 @@ def fill_daily_sheet(monthly_file, target, download_dir, sale_analysis_data):
 
         # ── G23~G28: 销售趋势分析小时数据 ──
         hourly_data = sale_analysis_data.get(store["store_short"], {})
+        hour_row_map = store["hour_row_map"]
         filled_hours = 0
         max_val = None
         max_row = None
-        for hour, row in HOUR_ROW_MAP.items():
+        for hour, row in hour_row_map.items():
             if hour in hourly_data:
                 val = hourly_data[hour]
                 ws.cell(row=row, column=offset + 7).value = val
@@ -1105,8 +1108,11 @@ def fill_daily_sheet(monthly_file, target, download_dir, sale_analysis_data):
                     max_val = val
                     max_row = row
         if max_row is not None:
+            cell = ws.cell(row=max_row, column=offset + 7)
+            old_border = copy.copy(cell.border)
             red_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
-            ws.cell(row=max_row, column=offset + 7).fill = red_fill
+            cell.fill = red_fill
+            cell.border = old_border
         logger.info(f"      G23-G28: {filled_hours} 个时段, 最大值行={max_row}")
 
     wb.save(monthly_file)
