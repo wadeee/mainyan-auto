@@ -221,4 +221,4 @@ config.env
 /.claude/
 /mainyan-auto.zip
 /test/
-/temp.txt
+/claude-ask.txt
