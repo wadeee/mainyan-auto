@@ -898,15 +898,13 @@ def read_stats_value(target, store, column):
     return round(val, 2) if val else None
 
 
-def read_stats_bi_week_sum(target, store):
-    """读取营业统计 BI 列本周（周一到目标日期）的累计值（支持公式递归计算）。"""
+def read_stats_bi_month_sum(target, store):
+    """读取营业统计 BI 列当月（1号到目标日期）的累计值（支持公式递归计算）。"""
     month_str = f"{target.year}-{target.month:02d}"
     stats_file = STATS_DIR / month_str / f"麦安研营业统计_{month_str}.xlsx"
 
     if not stats_file.exists():
         return None
-
-    monday = target - timedelta(days=target.weekday())
 
     wb = load_workbook(stats_file, data_only=False)
     if store["stats_ws_index"] >= len(wb.worksheets):
@@ -917,13 +915,10 @@ def read_stats_bi_week_sum(target, store):
     cache = {}
 
     total = 0
-    current = monday
-    while current <= target:
-        if current.month == target.month and current.year == target.year:
-            row = current.day + 4
-            val = _eval_cell(ws, row, 61, cache)
-            total += val
-        current += timedelta(days=1)
+    for day in range(1, target.day + 1):
+        row = day + 4
+        val = _eval_cell(ws, row, 61, cache)
+        total += val
 
     wb.close()
     return round(total, 2) if total else None
@@ -1031,11 +1026,11 @@ def fill_daily_sheet(monthly_file, target, download_dir, sale_analysis_data):
             ws.cell(row=8, column=offset + 2).value = bi_val
             logger.info(f"      B8 (BI): {bi_val}")
 
-        # ── B9: 营业统计 BI 列本周累计 ──
-        bi_week = read_stats_bi_week_sum(target, store)
-        if bi_week is not None:
-            ws.cell(row=9, column=offset + 2).value = bi_week
-            logger.info(f"      B9 (BI周累计): {bi_week}")
+        # ── B9: 营业统计 BI 列当月累计（1号到目标日期） ──
+        bi_month = read_stats_bi_month_sum(target, store)
+        if bi_month is not None:
+            ws.cell(row=9, column=offset + 2).value = bi_month
+            logger.info(f"      B9 (BI月累计): {bi_month}")
 
         # ── B14: 仓库配送门店金额合计 ──
         delivery_amount = delivery_totals.get(abbr, 0)
