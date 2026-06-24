@@ -803,7 +803,7 @@ def read_product_sale_data(file_path):
         if name is None:
             continue
         name = str(name).strip()
-        if not name or name in ("合计", "总计"):
+        if not name or name in ("合计", "总计", "无码商品"):
             continue
         category = str(ws.cell(row=r, column=6).value or "").strip()
         amount = _parse_numeric(ws.cell(row=r, column=10).value)
