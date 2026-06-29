@@ -179,6 +179,7 @@ def read_report_data(report_file: Path):
         rows.append({
             "name": ws.cell(row=r, column=2).value,
             "category": ws.cell(row=r, column=3).value,
+            "barcode": ws.cell(row=r, column=4).value,
             "spec": ws.cell(row=r, column=6).value,
             "unit": ws.cell(row=r, column=7).value,
             "quantities": quantities,
@@ -919,21 +920,24 @@ def main():
                 if len(row) < required_len:
                     data_rows[i] = list(row) + [None] * (required_len - len(row))
 
-            # 建立商品名称到行索引的映射，用于合并同名商品
-            name_to_row_idx = {}
+            # 建立(条码,单位)到行索引的映射，用于合并同商品
+            key_to_row_idx = {}
             for i, row in enumerate(data_rows):
-                name = str(row[3]).strip() if row[3] is not None else ""
-                if name:
-                    name_to_row_idx[name] = i
+                barcode = str(row[2]).strip() if row[2] is not None else ""
+                unit = str(row[5]).strip() if row[5] is not None else ""
+                if barcode:
+                    key_to_row_idx[(barcode, unit)] = i
 
-            # 将大客户数据合并到 data_rows（同名商品合并到已有行，否则新增行）
+            # 将大客户数据合并到 data_rows（同条码+单位商品合并到已有行，否则新增行）
             merged_count = 0
             new_count = 0
             for rpt_row in report_rows:
                 if not any(rpt_row["quantities"].values()):
                     continue
-                rpt_name = str(rpt_row["name"]).strip() if rpt_row["name"] else ""
-                existing_idx = name_to_row_idx.get(rpt_name)
+                rpt_barcode = str(rpt_row["barcode"]).strip() if rpt_row["barcode"] else ""
+                rpt_unit = str(rpt_row["unit"]).strip() if rpt_row["unit"] else ""
+                rpt_key = (rpt_barcode, rpt_unit)
+                existing_idx = key_to_row_idx.get(rpt_key) if rpt_barcode else None
 
                 if existing_idx is not None:
                     # 同名商品：在已有行的焙满香门店列填入数量
@@ -954,6 +958,7 @@ def main():
                     # 新商品：创建新行追加
                     new_row = [None] * required_len
                     new_row[1] = rpt_row["category"]
+                    new_row[2] = rpt_row["barcode"]
                     new_row[3] = rpt_row["name"]
                     new_row[4] = rpt_row["spec"]
                     new_row[5] = rpt_row["unit"]
@@ -963,7 +968,8 @@ def main():
                         qty = rpt_row["quantities"].get(sname, 0)
                         new_row[col_idx] = qty if qty else None
                     data_rows.append(new_row)
-                    name_to_row_idx[rpt_name] = len(data_rows) - 1
+                    if rpt_barcode:
+                        key_to_row_idx[rpt_key] = len(data_rows) - 1
                     new_count += 1
 
             logger.info(f"  焙满香数据: {merged_count} 行合并到已有商品, {new_count} 行为新增商品")
