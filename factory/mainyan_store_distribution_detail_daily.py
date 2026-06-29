@@ -114,57 +114,47 @@ def read_downloaded_data(data_file):
     返回: {门店全称: [产品行列表]}
     """
     wb = load_workbook(data_file, data_only=True)
+    ws = wb.active
     stores_data = {}
 
-    for ws in wb.worksheets:
-        store_name = ws.title.strip()
-        if store_name not in STORE_NAME_MAP:
+    for r in range(2, ws.max_row + 1):
+        store_name = ws.cell(row=r, column=4).value  # D: 订货组织
+        if not store_name or store_name not in STORE_NAME_MAP:
             continue
 
-        # 查找表头行（包含"商品名称"的行）
-        header_row = None
-        for r in range(1, min(10, ws.max_row + 1)):
-            cell_k = ws.cell(row=r, column=11).value  # K列：商品名称
-            if cell_k and "商品名称" in str(cell_k):
-                header_row = r
-                break
-
-        if not header_row:
-            logger.warning(f"  跳过 {store_name}：未找到表头行")
+        product_name = ws.cell(row=r, column=11).value  # K: 商品名称
+        if not product_name:
             continue
 
-        products = []
-        for r in range(header_row + 1, ws.max_row + 1):
-            product_name = ws.cell(row=r, column=11).value  # K: 商品名称
-            if not product_name:
-                continue
+        category = ws.cell(row=r, column=12).value  # L: 商品分类
+        spec = ws.cell(row=r, column=15).value  # O: 规格
+        unit = ws.cell(row=r, column=16).value  # P: 单位
+        delivery_rate = ws.cell(row=r, column=20).value  # T: 配货率
+        order_qty = ws.cell(row=r, column=17).value  # Q: 订货量
+        delivered_qty = ws.cell(row=r, column=18).value  # R: 已配货量
+        order_price = ws.cell(row=r, column=23).value  # W: 订货价
+        order_amount = ws.cell(row=r, column=24).value  # X: 订货金额
+        delivered_amount = ws.cell(row=r, column=25).value  # Y: 已配货金额
 
-            category = ws.cell(row=r, column=12).value  # L: 商品分类
-            spec = ws.cell(row=r, column=15).value  # O: 规格
-            unit = ws.cell(row=r, column=16).value  # P: 单位
-            delivery_rate = ws.cell(row=r, column=20).value  # T: 配货率
-            order_qty = ws.cell(row=r, column=17).value  # Q: 订货量
-            delivered_qty = ws.cell(row=r, column=18).value  # R: 已配货量
-            order_price = ws.cell(row=r, column=23).value  # W: 订货价
-            order_amount = ws.cell(row=r, column=24).value  # X: 订货金额
-            delivered_amount = ws.cell(row=r, column=25).value  # Y: 已配货金额
+        product = {
+            "商品名称": product_name,
+            "商品分类": category,
+            "规格": spec,
+            "单位": unit,
+            "配货率": delivery_rate,
+            "订货量": order_qty,
+            "已配货量": delivered_qty,
+            "订货价": order_price,
+            "订货金额": order_amount,
+            "已配货金额": delivered_amount,
+        }
 
-            products.append({
-                "商品名称": product_name,
-                "商品分类": category,
-                "规格": spec,
-                "单位": unit,
-                "配货率": delivery_rate,
-                "订货量": order_qty,
-                "已配货量": delivered_qty,
-                "订货价": order_price,
-                "订货金额": order_amount,
-                "已配货金额": delivered_amount,
-            })
+        if store_name not in stores_data:
+            stores_data[store_name] = []
+        stores_data[store_name].append(product)
 
-        if products:
-            stores_data[store_name] = products
-            logger.info(f"  {store_name}: {len(products)} 条记录")
+    for store_name, products in stores_data.items():
+        logger.info(f"  {store_name}: {len(products)} 条记录")
 
     return stores_data
 
@@ -273,6 +263,12 @@ def merge_into_template(stores_data, template_file, output_file, target_date):
     # 删除输出工作簿中的所有sheet
     for ws_name in wb_output.sheetnames:
         del wb_output[ws_name]
+
+    if not stores_data:
+        logger.warning("  无数据，跳过生成报表")
+        wb_template.close()
+        wb_output.close()
+        return
 
     date_str = target_date.strftime("%Y年%#m月%#d日") if sys.platform == "win32" else target_date.strftime(
         "%Y年%-m月%-d日")
@@ -477,7 +473,9 @@ def main():
             download = dl_info.value
             logger.info(f"  下载文件名: {download.suggested_filename}")
 
-            dest = output_dir / f"订货配货明细_{date_str}.xlsx"
+            raw_dir = output_dir / "原始下载"
+            raw_dir.mkdir(parents=True, exist_ok=True)
+            dest = raw_dir / f"订货配货明细_{date_str}.xlsx"
             download.save_as(dest)
             logger.info(f"  已保存到: {dest}")
 
