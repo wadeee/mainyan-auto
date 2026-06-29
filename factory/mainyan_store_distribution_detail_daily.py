@@ -458,6 +458,14 @@ def main():
             set_date(page, "开始日期", f"{date_display} 00:00")
             set_date(page, "结束日期", f"{date_display} 23:59")
 
+            page.click(".submitBtn")
+            page.wait_for_load_state("networkidle")
+            time.sleep(2)
+
+            logger.info(f"  设置日期: {date_display}")
+            set_date(page, "开始日期", f"{date_display} 00:00")
+            set_date(page, "结束日期", f"{date_display} 23:59")
+
             # 点击查询按钮，验证日期并重试
             logger.info("  点击查询")
             for attempt in range(1, 4):
