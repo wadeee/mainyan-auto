@@ -69,6 +69,36 @@ STORE_NAME_MAP = {
 
 # ─── 工具函数 ──────────────────────────────────────────────────────────────────
 
+def set_date(page, placeholder: str, value: str):
+    """设置日期输入框的值并触发必要事件"""
+    page.evaluate(f"""
+        (function() {{
+            var inp = document.querySelector('input.timeInput.hasDatepicker[placeholder="{placeholder}"]');
+            if (!inp) return 'not found';
+            inp.value = "{value}";
+            inp.dispatchEvent(new Event('input',  {{bubbles: true}}));
+            inp.dispatchEvent(new Event('change', {{bubbles: true}}));
+            inp.dispatchEvent(new Event('blur',   {{bubbles: true}}));
+            return inp.value;
+        }})()
+    """)
+
+
+def verify_dates(page, expected_date: str) -> bool:
+    """验证两个日期输入框的值是否都包含期望日期"""
+    result = page.evaluate("""
+        (function() {
+            var r = [];
+            document.querySelectorAll('input.timeInput.hasDatepicker').forEach(function(inp) {
+                r.push(inp.placeholder + '=' + inp.value);
+            });
+            return r.join(' | ');
+        })()
+    """)
+    logger.info(f"  [日期验证] {result}")
+    return expected_date in result and result.count(expected_date) == 2
+
+
 def copy_cell_style(src_cell, dst_cell):
     if src_cell.has_style:
         dst_cell.font = copy.copy(src_cell.font)
@@ -406,14 +436,26 @@ def main():
 
             # 设置日期范围
             logger.info(f"  设置日期: {date_display}")
-            page.fill("#ui-timePicker-begin-468574", f"{date_display} 00:00")
-            page.fill("#ui-timePicker-end-659993", f"{date_display} 23:59")
+            set_date(page, "开始日期", f"{date_display} 00:00")
+            set_date(page, "结束日期", f"{date_display} 23:59")
 
-            # 点击查询按钮
+            # 点击查询按钮，验证日期并重试
             logger.info("  点击查询")
-            page.click(".submitBtn")
-            page.wait_for_load_state("networkidle")
-            time.sleep(2)
+            for attempt in range(1, 4):
+                logger.info(f"  查询第 {attempt} 次...")
+                page.click(".submitBtn")
+                page.wait_for_load_state("networkidle")
+                time.sleep(2)
+
+                if verify_dates(page, date_display):
+                    logger.info(f"  ✅ 查询成功，日期正确")
+                    break
+                else:
+                    logger.warning("  日期被重置！重新设置日期...")
+                    set_date(page, "开始日期", f"{date_display} 00:00")
+                    set_date(page, "结束日期", f"{date_display} 23:59")
+            else:
+                raise RuntimeError("查询 3 次后日期仍然不正确")
 
             # 点击导出按钮
             logger.info("  点击导出")
