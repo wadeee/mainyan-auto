@@ -175,15 +175,14 @@ def sort_products(products):
     """排序：非100%配货率在前，按配货率从高到低排列；100%的在后。"""
 
     def sort_key(p):
-        rate_str = str(p["配货率"]).strip()
-        if rate_str in ("100%", "100.00%", "100"):
-            return (1, 0)  # 100% 排到后面
-        # 提取数值
-        match = re.search(r'([\d.]+)', rate_str)
-        if match:
-            rate_val = float(match.group(1))
-            return (0, -rate_val)  # 非100%，数值从高到低
-        return (1, 0)
+        rate = p["配货率"]
+        if rate is None:
+            return (1, 0)
+        # 兼容小数格式(0.8=80%)和百分比格式(80=80%)
+        full = (rate >= 100) if rate > 1 else (rate >= 1.0)
+        if full:
+            return (1, 0)
+        return (0, -rate)  # 非100%，数值从高到低
 
     return sorted(products, key=sort_key)
 
@@ -349,9 +348,9 @@ def merge_into_template(stores_data, template_file, output_file, target_date):
             if order_qty == delivered_qty:
                 remark = "-"
             elif order_qty < delivered_qty:
-                remark = f"多送{delivered_qty - order_qty}{unit}"
+                remark = f"多送{int(delivered_qty - order_qty)}{unit}"
             else:
-                remark = f"少送{order_qty - delivered_qty}{unit}"
+                remark = f"少送{int(order_qty - delivered_qty)}{unit}"
 
             data_map = [
                 (1, product["商品名称"]),
