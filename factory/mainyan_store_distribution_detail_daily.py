@@ -136,17 +136,29 @@ def read_downloaded_data(data_file):
         order_amount = ws.cell(row=r, column=24).value  # X: 订货金额
         delivered_amount = ws.cell(row=r, column=25).value  # Y: 已配货金额
 
+        # 转换数值类型
+        def to_float(val):
+            if val is None or val == '':
+                return None
+            if isinstance(val, (int, float)):
+                return float(val)
+            s = str(val).strip().replace('%', '').replace(',', '')
+            try:
+                return float(s) / 100 if '%' in str(val) else float(s)
+            except:
+                return None
+
         product = {
             "商品名称": product_name,
             "商品分类": category,
             "规格": spec,
             "单位": unit,
-            "配货率": delivery_rate,
-            "订货量": order_qty,
-            "已配货量": delivered_qty,
-            "订货价": order_price,
-            "订货金额": order_amount,
-            "已配货金额": delivered_amount,
+            "配货率": to_float(delivery_rate),
+            "订货量": to_float(order_qty),
+            "已配货量": to_float(delivered_qty),
+            "订货价": to_float(order_price),
+            "订货金额": to_float(order_amount),
+            "已配货金额": to_float(delivered_amount),
         }
 
         if store_name not in stores_data:
@@ -346,8 +358,8 @@ def merge_into_template(stores_data, template_file, output_file, target_date):
             for col_idx, value in data_map:
                 src_cell = ws_template.cell(row=template_row, column=col_idx)
                 dst_cell = ws_new.cell(row=row_idx, column=col_idx)
-                dst_cell.value = value
                 copy_cell_style(src_cell, dst_cell)
+                dst_cell.value = value
 
         logger.info(f"  生成 {store_short} sheet，{data_row_count} 行数据")
 
