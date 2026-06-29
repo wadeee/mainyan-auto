@@ -341,13 +341,25 @@ def merge_into_template(stores_data, template_file, output_file, target_date):
             ws_new.row_dimensions[row_idx].height = ws_template.row_dimensions[template_row].height
 
             # 填充数据并复制样式
+            order_qty = product["订货量"] or 0
+            delivered_qty = product["已配货量"] or 0
+            unit = product["单位"] or ""
+
+            # 计算备货备注
+            if order_qty == delivered_qty:
+                remark = "-"
+            elif order_qty < delivered_qty:
+                remark = f"多送{delivered_qty - order_qty}{unit}"
+            else:
+                remark = f"少送{order_qty - delivered_qty}{unit}"
+
             data_map = [
                 (1, product["商品名称"]),
                 (2, product["商品分类"]),
                 (3, product["规格"]),
                 (4, product["单位"]),
                 (5, product["配货率"]),
-                (6, None),  # 备货备注
+                (6, remark),
                 (7, product["订货量"]),
                 (8, product["已配货量"]),
                 (9, product["订货价"]),
