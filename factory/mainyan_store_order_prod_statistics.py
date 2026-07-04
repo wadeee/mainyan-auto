@@ -1,5 +1,5 @@
 """
-麦安研门店订购商品统计 - 自动导出 & 格式化脚本
+麦安研+焙满香门店订购商品统计表 - 自动导出 & 格式化脚本
 =====================================
 依赖：pip install playwright openpyxl && playwright install chromium
 
@@ -10,10 +10,10 @@
   4. 将下载数据填入格式模板，生成格式化汇总看板
 
 用法：
-    python mainyan_prod_order_statistics.py                    # 导出后天的数据
-    python mainyan_prod_order_statistics.py --date 2026.05.30  # 指定日期
-    python mainyan_prod_order_statistics.py --days 2           # N天后（默认2=后天）
-    python mainyan_prod_order_statistics.py --headless         # 无头模式（不显示浏览器）
+    python mainyan_store_order_prod_statistics.py                    # 导出后天的数据
+    python mainyan_store_order_prod_statistics.py --date 2026.05.30  # 指定日期
+    python mainyan_store_order_prod_statistics.py --days 2           # N天后（默认2=后天）
+    python mainyan_store_order_prod_statistics.py --headless         # 无头模式（不显示浏览器）
 """
 
 import argparse
@@ -34,7 +34,7 @@ LOG_DIR = Path(__file__).resolve().parent / "log"
 LOG_DIR.mkdir(exist_ok=True)
 
 _file_handler = logging.handlers.TimedRotatingFileHandler(
-    LOG_DIR / "mainyan_prod_order_statistics.log",
+    LOG_DIR / "mainyan_store_order_prod_statistics.log",
     when="midnight",
     backupCount=30,
     encoding="utf-8",
@@ -58,8 +58,8 @@ SUMMARY_BOARD_URL = "https://css69.pospal.cn/ChainStoreSupplySeller/ProductReque
 ITEM_BOARD_URL = "https://css69.pospal.cn/ChainStoreSupplySeller/ProductRequestItemBoard"
 ORDER_PRODUCT_REPORT_URL = "https://beta69.pospal.cn/EnterpriseReport/OrderProductReport"
 
-OUTPUT_DIR = Path(__file__).resolve().parent / "麦安研门店订购商品统计"
-TEMPLATE_FILE = Path(__file__).resolve().parent / "麦安研门店订购商品统计_格式化模板.xlsx"
+OUTPUT_DIR = Path(__file__).resolve().parent / "麦安研+焙满香门店订购商品统计表"
+TEMPLATE_FILE = Path(__file__).resolve().parent / "麦安研+焙满香门店订购商品统计表_格式化模板.xlsx"
 
 STATUS_OPTIONS = [
     "待审核",
@@ -811,7 +811,7 @@ def export_and_save(page, target_date: str, file_prefix: str, *, confirm_after_e
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Pospal 麦安研门店订购商品统计自动导出")
+    parser = argparse.ArgumentParser(description="Pospal 麦安研+焙满香门店订购商品统计表自动导出")
     parser.add_argument("--date", type=str, help="指定日期，格式 YYYY.MM.DD，如 2026.05.30")
     parser.add_argument("--days", type=int, default=2, help="今天之后第N天（默认2=后天）")
     parser.add_argument("--headless", action="store_true", help="无头模式（不显示浏览器窗口）")
@@ -861,12 +861,12 @@ def main():
             report_row_count = search_and_count_rows(page, target_date)
             report_path = export_and_save(page, target_date, "大客户订购商品统计表", confirm_after_export=True)
 
-            # ── 任务 2：麦安研门店订购商品统计 ──
+            # ── 任务 2：麦安研+焙满香门店订购商品统计表 ──
             logger.info(f"{'─' * 55}")
-            logger.info(f"  任务 2/3：麦安研门店订购商品统计")
+            logger.info(f"  任务 2/3：麦安研+焙满香门店订购商品统计表")
             logger.info(f"{'─' * 55}")
 
-            navigate_to_board(page, SUMMARY_BOARD_URL, "麦安研门店订购商品统计")
+            navigate_to_board(page, SUMMARY_BOARD_URL, "麦安研+焙满香门店订购商品统计表")
             setup_filters(page, target_date)
             summary_row_count = search_and_count_rows(page, target_date, "btnLoadRequestList")
             summary_path = export_and_save(page, target_date, "订货商品汇总看板")
@@ -884,7 +884,7 @@ def main():
             logger.info(f"{'=' * 55}")
             logger.info(f"  ✅ 下载完成！")
             logger.info(f"  大客户订购商品统计表：{report_row_count} 行 → {report_path}")
-            logger.info(f"  麦安研门店订购商品统计：{summary_row_count} 行 → {summary_path}")
+            logger.info(f"  麦安研+焙满香门店订购商品统计表：{summary_row_count} 行 → {summary_path}")
             logger.info(f"  订货商品明细看板：{item_row_count} 行 → {item_path}")
             logger.info(f"{'=' * 55}\n")
 
@@ -1004,7 +1004,7 @@ def main():
             if report_amt_total:
                 logger.info(f"  大客户报表金额汇总: {report_amt_total:.2f}")
 
-            all_output = OUTPUT_DIR / date_str / f"麦安研门店订购商品统计_格式化_全部_{date_str}.xlsx"
+            all_output = OUTPUT_DIR / date_str / f"麦安研+焙满香门店订购商品统计表_格式化_全部_{date_str}.xlsx"
             merge_into_template(
                 data_rows, total_col_idx, store_columns,
                 TEMPLATE_FILE, all_output, all_category_sums,
@@ -1023,7 +1023,7 @@ def main():
                     logger.info(f"  [{export_name}] 无数据，跳过")
                     continue
 
-                output_file = OUTPUT_DIR / date_str / f"麦安研门店订购商品统计_{export_name}_{date_str}.xlsx"
+                output_file = OUTPUT_DIR / date_str / f"麦安研+焙满香门店订购商品统计表_{export_name}_{date_str}.xlsx"
                 merge_into_template(
                     filtered_rows, total_col_idx, store_columns,
                     TEMPLATE_FILE, output_file, all_category_sums,
