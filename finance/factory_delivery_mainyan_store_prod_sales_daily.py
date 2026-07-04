@@ -1,15 +1,15 @@
 """
-工厂配送麦安研门店每日销售报表 - 自动化脚本
+工厂配送麦安研+焙满香门店商品每日销售对比表 - 自动化脚本
 =====================================
 依赖：pip install playwright openpyxl && playwright install chromium
 
 自动登录 Pospal 后台，导出仓库配送商品门店对比表并生成每日格式化报表。
 
 用法：
-    python factory_delivery_mainyan_daily.py                    # 导出今天的数据
-    python factory_delivery_mainyan_daily.py --days -1          # 导出昨天的数据
-    python factory_delivery_mainyan_daily.py --date 2026.06.20  # 指定日期
-    python factory_delivery_mainyan_daily.py --headless          # 无头模式（不显示浏览器）
+    python factory_delivery_mainyan_store_prod_sales_daily.py                    # 导出今天的数据
+    python factory_delivery_mainyan_store_prod_sales_daily.py --days -1          # 导出昨天的数据
+    python factory_delivery_mainyan_store_prod_sales_daily.py --date 2026.06.20  # 指定日期
+    python factory_delivery_mainyan_store_prod_sales_daily.py --headless          # 无头模式（不显示浏览器）
 """
 
 import argparse
@@ -30,7 +30,7 @@ LOG_DIR = Path(__file__).resolve().parent / "log"
 LOG_DIR.mkdir(exist_ok=True)
 
 _file_handler = logging.handlers.TimedRotatingFileHandler(
-    LOG_DIR / "factory_delivery_mainyan_daily.log",
+    LOG_DIR / "factory_delivery_mainyan_store_prod_sales_daily.log",
     when="midnight",
     backupCount=30,
     encoding="utf-8",
@@ -53,8 +53,8 @@ LOGIN_URL = "https://beta69.pospal.cn/"
 REPORT_URL = "https://css69.pospal.cn/ChainStoreSupplyReport/WarehouseDeliveryProductStoreComparison"
 DELIVERY_PRODUCT_COMPARISON_URL = "https://css69.pospal.cn/EnterpriseReport/DeliveryProductComparison"
 
-OUTPUT_DIR = Path(__file__).resolve().parent / "工厂配送麦安研门店每日销售报表"
-TEMPLATE_FILE = Path(__file__).resolve().parent / "工厂配送麦安研门店每日销售报表_格式化模板.xlsx"
+OUTPUT_DIR = Path(__file__).resolve().parent / "工厂配送麦安研+焙满香门店商品每日销售对比表"
+TEMPLATE_FILE = Path(__file__).resolve().parent / "工厂配送麦安研+焙满香门店商品每日销售对比表_格式化模板.xlsx"
 
 STORE_NAME_MAP = {
     "麦安研（顺德杏坛店）": "杏坛",
@@ -598,7 +598,7 @@ def login(page):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Pospal 工厂配送麦安研门店每日销售报表自动化脚本")
+    parser = argparse.ArgumentParser(description="Pospal 工厂配送麦安研+焙满香门店商品每日销售对比表自动化脚本")
     parser.add_argument("--days", type=int, default=0, help="日期偏移：0=今天，-1=昨天（默认0）")
     parser.add_argument("--date", type=str, help="指定日期，格式 YYYY.MM.DD")
     parser.add_argument("--headless", action="store_true", help="无头模式（不显示浏览器窗口）")
@@ -614,7 +614,7 @@ def main():
     date_str = target_dt.strftime("%Y-%m-%d")
 
     logger.info(f"{'=' * 55}")
-    logger.info(f"  Pospal 工厂配送麦安研门店每日销售报表")
+    logger.info(f"  Pospal 工厂配送麦安研+焙满香门店商品每日销售对比表")
     logger.info(f"  目标日期：{target_date}")
     logger.info(f"  输出根目录：{OUTPUT_DIR}")
     logger.info(f"{'=' * 55}")
@@ -829,11 +829,11 @@ def main():
             logger.info("  读取焙满香门店数据...")
             bmx_data = read_bmx_store_data(dest2)
 
-            formatted_output = OUTPUT_DIR / date_str / f"工厂配送麦安研门店每日销售报表_{date_str}.xlsx"
+            formatted_output = OUTPUT_DIR / date_str / f"工厂配送麦安研+焙满香门店商品每日销售对比表_{date_str}.xlsx"
             merge_into_template(dest, TEMPLATE_FILE, formatted_output, target_date, bmx_data)
 
             logger.info(f"{'=' * 55}")
-            logger.info(f"  工厂配送麦安研门店每日销售报表全部完成！")
+            logger.info(f"  工厂配送麦安研+焙满香门店商品每日销售对比表全部完成！")
             logger.info(f"  仓库配送商品门店对比表 → {dest}")
             logger.info(f"  仓库配送商品大客户对比表 → {dest2}")
             logger.info(f"  格式化输出 → {formatted_output}")
