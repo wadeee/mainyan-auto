@@ -66,7 +66,7 @@ TARGET_CATEGORIES = [
     "蛋糕及面包成品及饼干类",
 ]
 
-REPORT_EXCLUDED_STORES = {"焙满香滨江店", "焙满香广钢店"}
+REPORT_EXCLUDED_STORES = {"焙满香滨江店", "焙满香广钢店", "焙满香南州路店"}
 
 TEMPLATE_FILE = Path(__file__).resolve().parent / "兔司家门店订购商品统计_格式化模板.xlsx"
 
