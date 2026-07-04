@@ -6,10 +6,10 @@
 自动登录 Pospal 后台，导出订货配货明细并生成格式化报表。
 
 用法：
-    python mainyan_store_distribution_diff_detail_daily.py                    # 导出今天的数据
-    python mainyan_store_distribution_diff_detail_daily.py --days -1          # 导出昨天的数据
-    python mainyan_store_distribution_diff_detail_daily.py --date 2026.06.20  # 指定日期
-    python mainyan_store_distribution_diff_detail_daily.py --headless         # 无头模式（不显示浏览器）
+    python mainyan_store_distribution_diff_detail.py                    # 导出今天的数据
+    python mainyan_store_distribution_diff_detail.py --days -1          # 导出昨天的数据
+    python mainyan_store_distribution_diff_detail.py --date 2026.06.20  # 指定日期
+    python mainyan_store_distribution_diff_detail.py --headless         # 无头模式（不显示浏览器）
 """
 
 import argparse
@@ -31,7 +31,7 @@ LOG_DIR = Path(__file__).resolve().parent / "log"
 LOG_DIR.mkdir(exist_ok=True)
 
 _file_handler = logging.handlers.TimedRotatingFileHandler(
-    LOG_DIR / "mainyan_store_distribution_diff_detail_daily.log",
+    LOG_DIR / "mainyan_store_distribution_diff_detail.log",
     when="midnight",
     backupCount=30,
     encoding="utf-8",

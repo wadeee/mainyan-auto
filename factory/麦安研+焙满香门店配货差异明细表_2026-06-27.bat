@@ -9,7 +9,7 @@ echo 正在导出 %TARGET_DATE% 麦安研+焙满香门店配货差异明细表..
 
 for /f "tokens=1,* delims==" %%a in (config.env) do if "%%a"=="PYTHON_PATH" set "PYTHON_PATH=%%b"
 
-"%PYTHON_PATH%" mainyan_store_distribution_diff_detail_daily.py --headless --date %TARGET_DATE:-=.% %*
+"%PYTHON_PATH%" mainyan_store_distribution_diff_detail.py --headless --date %TARGET_DATE:-=.% %*
 if errorlevel 1 (
     echo.
     echo 任务失败，请查看上方错误信息。
