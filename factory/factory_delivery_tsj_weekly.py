@@ -62,6 +62,8 @@ TOTALS_ROW = 3
 DATA_START_ROW = 4
 SAMPLE_ROW = 4
 
+IGNORED_CUSTOMERS = {"焙满香南州路店", "焙满香滨江店", "焙满香广钢店"}
+
 CUSTOMER_NAME_MAP = {
     "焙满香广钢店": "广钢店",
     "焙满香滨江店": "滨江店",
@@ -1233,22 +1235,29 @@ def main():
 
             logger.info("  读取仓库配送商品大客户对比表（聚合）...")
             product_rows = read_product_comparison(dest2)
+            product_rows = [r for r in product_rows if r["大客户名称"] not in IGNORED_CUSTOMERS]
             logger.info(f"  共 {len(product_rows)} 个大客户（商品聚合）")
 
             logger.info("  读取仓库配送大客户对比表（订单数）...")
             delivery_rows = read_delivery_comparison(dest)
+            delivery_rows = [r for r in delivery_rows if r["大客户名称"] not in IGNORED_CUSTOMERS]
             logger.info(f"  共 {len(delivery_rows)} 个大客户")
 
             logger.info("  读取配送费数据...")
             fee_data = read_delivery_fee(dest_fee)
+            for _ign in IGNORED_CUSTOMERS:
+                fee_data.pop(_ign, None)
             logger.info(f"  共 {len(fee_data)} 条配送费数据")
 
             logger.info("  读取自产品数据...")
             self_product_data = read_self_product(dest_self)
+            for _ign in IGNORED_CUSTOMERS:
+                self_product_data.pop(_ign, None)
             logger.info(f"  共 {len(self_product_data)} 条自产品数据")
 
             logger.info("  读取商品大客户对比表明细...")
             product_detail_rows = read_product_comparison_detail(dest2)
+            product_detail_rows = [r for r in product_detail_rows if r["大客户名称"] not in IGNORED_CUSTOMERS]
             logger.info(f"  共 {len(product_detail_rows)} 条明细行")
 
             formatted_output = OUTPUT_DIR / date_range_str / f"工厂配送兔司家门店周度销售报表_{date_range_str}.xlsx"
