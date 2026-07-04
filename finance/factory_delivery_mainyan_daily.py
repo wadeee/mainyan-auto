@@ -231,7 +231,7 @@ def read_downloaded_data(data_file):
 def read_bmx_store_data(data_file):
     """读取仓库配送商品大客户对比表，提取焙满香三家门店数据，按商品名称透视。
 
-    返回 {商品名称: {store_short: {数量: x, 金额: y}}}
+    返回 {商品名称: {"info": {商品大类, 商品分类, 规格, 单位}, "stores": {store_short: {数量, 金额}}}}
     """
     wb = load_workbook(data_file, data_only=True)
     ws = wb.active
@@ -260,32 +260,101 @@ def read_bmx_store_data(data_file):
             continue
 
         if product_name not in pivot:
-            pivot[product_name] = {}
-        if store_short not in pivot[product_name]:
-            pivot[product_name][store_short] = {"数量": 0.0, "金额": 0.0}
+            pivot[product_name] = {
+                "info": {
+                    "商品大类": str(ws.cell(row=r, column=headers["商品大类"]).value or "").strip(),
+                    "商品分类": str(ws.cell(row=r, column=headers["商品分类"]).value or "").strip(),
+                    "规格": ws.cell(row=r, column=headers["规格"]).value,
+                    "单位": ws.cell(row=r, column=headers["单位"]).value,
+                },
+                "stores": {},
+            }
+        if store_short not in pivot[product_name]["stores"]:
+            pivot[product_name]["stores"][store_short] = {"数量": 0.0, "金额": 0.0}
 
         qty = ws.cell(row=r, column=headers["实际销售量"]).value
         amt = ws.cell(row=r, column=headers["实际销售金额"]).value
         if qty:
             try:
-                pivot[product_name][store_short]["数量"] += float(qty)
+                pivot[product_name]["stores"][store_short]["数量"] += float(qty)
             except (ValueError, TypeError):
                 pass
         if amt:
             try:
-                pivot[product_name][store_short]["金额"] += float(amt)
+                pivot[product_name]["stores"][store_short]["金额"] += float(amt)
             except (ValueError, TypeError):
                 pass
 
     wb.close()
 
     for pname in pivot:
-        for store in pivot[pname]:
-            pivot[pname][store]["数量"] = _to_num(pivot[pname][store]["数量"])
-            pivot[pname][store]["金额"] = _to_num(pivot[pname][store]["金额"])
+        for store in pivot[pname]["stores"]:
+            pivot[pname]["stores"][store]["数量"] = _to_num(pivot[pname]["stores"][store]["数量"])
+            pivot[pname]["stores"][store]["金额"] = _to_num(pivot[pname]["stores"][store]["金额"])
 
     logger.info(f"  焙满香门店数据: {len(pivot)} 个商品")
     return pivot
+
+
+def merge_products_with_bmx(products, bmx_data):
+    """将焙满香门店数据合并到产品列表中。
+
+    - 已存在的商品：将焙满香门店数据追加到 stores 字典
+    - 仅焙满香有的商品：新建产品条目
+    返回 (合并后的产品列表, 活跃焙满香门店列表)
+    """
+    # 计算活跃的焙满香门店
+    bmx_active_order = []
+    for short_name in BMX_STORE_ORDER:
+        has_data = any(
+            (stores["stores"].get(short_name, {}).get("数量") is not None or
+             stores["stores"].get(short_name, {}).get("金额") is not None)
+            for stores in bmx_data.values()
+        )
+        if has_data:
+            bmx_active_order.append(short_name)
+
+    if not bmx_active_order:
+        return products, []
+
+    logger.info(f"  焙满香活跃门店 ({len(bmx_active_order)}): {', '.join(bmx_active_order)}")
+
+    # 为已有产品追加焙满香门店数据
+    product_name_set = set()
+    for p in products:
+        pname = p["商品名称"]
+        product_name_set.add(pname)
+        if pname in bmx_data:
+            for store_short in bmx_active_order:
+                sd = bmx_data[pname]["stores"].get(store_short)
+                if sd:
+                    p["stores"][store_short] = sd
+
+    # 添加仅焙满香有的商品
+    bmx_only_count = 0
+    for pname, data in bmx_data.items():
+        if pname in product_name_set:
+            continue
+        stores = {}
+        for store_short in bmx_active_order:
+            sd = data["stores"].get(store_short)
+            if sd:
+                stores[store_short] = sd
+        if stores:
+            products.append({
+                "商品大类": data["info"]["商品大类"],
+                "商品分类": data["info"]["商品分类"],
+                "商品名称": pname,
+                "规格": data["info"]["规格"],
+                "单位": data["info"]["单位"],
+                "stores": stores,
+            })
+            bmx_only_count += 1
+
+    if bmx_only_count:
+        logger.info(f"  焙满香独有商品: {bmx_only_count} 条（已合并）")
+
+    return products, bmx_active_order
 
 
 # ─── 排序 ──────────────────────────────────────────────────────────────────────
@@ -300,28 +369,12 @@ def _sort_key(product):
 # ─── 填充模板 ─────────────────────────────────────────────────────────────────
 
 
-def fill_sheet(wb, sorted_products, store_order, target_date, bmx_data=None):
+def fill_sheet(wb, sorted_products, store_order, target_date):
     ws = wb.worksheets[0]
     original_max_col = ws.max_column
 
     store_count = len(store_order)
-
-    # 过滤焙满香门店：仅保留有非零数据的门店
-    bmx_active_order = []
-    if bmx_data:
-        for short_name in BMX_STORE_ORDER:
-            has_data = any(
-                (store.get(short_name, {}).get("数量") is not None or
-                 store.get(short_name, {}).get("金额") is not None)
-                for store in bmx_data.values()
-            )
-            if has_data:
-                bmx_active_order.append(short_name)
-        if bmx_active_order:
-            logger.info(f"  焙满香活跃门店 ({len(bmx_active_order)}): {', '.join(bmx_active_order)}")
-
-    bmx_count = len(bmx_active_order)
-    max_col = 6 + store_count * 2 + bmx_count * 2
+    max_col = 6 + store_count * 2
 
     for mr in list(ws.merged_cells.ranges):
         ws.unmerge_cells(str(mr))
@@ -341,22 +394,8 @@ def fill_sheet(wb, sorted_products, store_order, target_date, bmx_data=None):
         amt_col = 8 + idx * 2
         store_columns[short_name] = (qty_col, amt_col)
 
-    # 建立焙满香门店列映射（紧接在现有门店列之后）
-    bmx_columns = {}
-    if bmx_active_order:
-        bmx_start = 7 + store_count * 2
-        for idx, short_name in enumerate(bmx_active_order):
-            qty_col = bmx_start + idx * 2
-            amt_col = bmx_start + idx * 2 + 1
-            bmx_columns[short_name] = (qty_col, amt_col)
-
     # 写入门店表头
     for short_name, (qty_col, amt_col) in store_columns.items():
-        ws.cell(row=HEADER_ROW, column=qty_col).value = f"{short_name}数量"
-        ws.cell(row=HEADER_ROW, column=amt_col).value = f"{short_name}金额"
-
-    # 写入焙满香门店表头
-    for short_name, (qty_col, amt_col) in bmx_columns.items():
         ws.cell(row=HEADER_ROW, column=qty_col).value = f"{short_name}数量"
         ws.cell(row=HEADER_ROW, column=amt_col).value = f"{short_name}金额"
 
@@ -378,19 +417,6 @@ def fill_sheet(wb, sorted_products, store_order, target_date, bmx_data=None):
                 ws.cell(row=r, column=qty_col).value = qty_val
             if amt_val is not None:
                 ws.cell(row=r, column=amt_col).value = amt_val
-
-        # 填充焙满香门店数据
-        if bmx_data:
-            product_name = product["商品名称"]
-            bmx_product = bmx_data.get(product_name, {})
-            for short_name, (qty_col, amt_col) in bmx_columns.items():
-                bmx_store = bmx_product.get(short_name, {})
-                qty_val = bmx_store.get("数量")
-                amt_val = bmx_store.get("金额")
-                if qty_val is not None:
-                    ws.cell(row=r, column=qty_col).value = qty_val
-                if amt_val is not None:
-                    ws.cell(row=r, column=amt_col).value = amt_val
 
         for col_idx in range(1, max_col + 1):
             src_idx = _style_ref_idx(col_idx, len(sample_cells))
@@ -444,10 +470,17 @@ def merge_into_template(data_file, template_file, output_file, target_date, bmx_
     logger.info("读取下载数据...")
     store_order, products = read_downloaded_data(data_file)
 
+    # 合并焙满香门店数据到统一的产品列表
+    bmx_active_order = []
+    if bmx_data:
+        products, bmx_active_order = merge_products_with_bmx(products, bmx_data)
+
     if not products:
         logger.warning("没有数据，跳过格式化")
         return
 
+    # 所有门店统一过滤和排序
+    all_store_order = store_order + bmx_active_order
     active_products = [
         p for p in products
         if any((s.get("数量") or 0) != 0 or (s.get("金额") or 0) != 0 for s in p["stores"].values())
@@ -457,9 +490,8 @@ def merge_into_template(data_file, template_file, output_file, target_date, bmx_
     logger.info(f"加载模板: {template_file}")
     wb = load_workbook(template_file)
 
-    bmx_info = f", 焙满香 {len(bmx_data)} 个商品" if bmx_data else ""
-    logger.info(f"填充数据, {len(sorted_products)} 条商品, {len(store_order)} 个门店{bmx_info}...")
-    fill_sheet(wb, sorted_products, store_order, target_date, bmx_data)
+    logger.info(f"填充数据, {len(sorted_products)} 条商品, {len(all_store_order)} 个门店...")
+    fill_sheet(wb, sorted_products, all_store_order, target_date)
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_file)
