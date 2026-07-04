@@ -1,15 +1,15 @@
 """
-麦安研门店配货明细表 - 自动化脚本
+麦安研+焙满香门店配货差异明细表 - 自动化脚本
 =====================================
 依赖：pip install playwright openpyxl && playwright install chromium
 
 自动登录 Pospal 后台，导出订货配货明细并生成格式化报表。
 
 用法：
-    python mainyan_store_distribution_detail_daily.py                    # 导出今天的数据
-    python mainyan_store_distribution_detail_daily.py --days -1          # 导出昨天的数据
-    python mainyan_store_distribution_detail_daily.py --date 2026.06.20  # 指定日期
-    python mainyan_store_distribution_detail_daily.py --headless         # 无头模式（不显示浏览器）
+    python mainyan_store_distribution_diff_detail_daily.py                    # 导出今天的数据
+    python mainyan_store_distribution_diff_detail_daily.py --days -1          # 导出昨天的数据
+    python mainyan_store_distribution_diff_detail_daily.py --date 2026.06.20  # 指定日期
+    python mainyan_store_distribution_diff_detail_daily.py --headless         # 无头模式（不显示浏览器）
 """
 
 import argparse
@@ -31,7 +31,7 @@ LOG_DIR = Path(__file__).resolve().parent / "log"
 LOG_DIR.mkdir(exist_ok=True)
 
 _file_handler = logging.handlers.TimedRotatingFileHandler(
-    LOG_DIR / "mainyan_store_distribution_detail_daily.log",
+    LOG_DIR / "mainyan_store_distribution_diff_detail_daily.log",
     when="midnight",
     backupCount=30,
     encoding="utf-8",
@@ -53,8 +53,8 @@ PASSWORD = "tusijia88"
 LOGIN_URL = "https://beta69.pospal.cn/"
 REPORT_URL = "https://css69.pospal.cn/ChainStoreSupplyReport/ProductRequestItem"
 
-OUTPUT_DIR = Path(__file__).resolve().parent / "麦安研门店配货明细表"
-TEMPLATE_FILE = Path(__file__).resolve().parent / "麦安研门店配货明细表_格式化模板.xlsx"
+OUTPUT_DIR = Path(__file__).resolve().parent / "麦安研+焙满香门店配货差异明细表"
+TEMPLATE_FILE = Path(__file__).resolve().parent / "麦安研+焙满香门店配货差异明细表_格式化模板.xlsx"
 
 STORE_NAME_MAP = {
     "麦安研（顺德杏坛店）": "杏坛",
@@ -387,7 +387,7 @@ def merge_into_template(stores_data, template_file, output_file, target_date):
 # ─── Playwright 自动化 ─────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="麦安研门店配货明细表自动导出")
+    parser = argparse.ArgumentParser(description="麦安研+焙满香门店配货差异明细表自动导出")
     parser.add_argument("--date", help="指定日期 (如 2026.06.20)")
     parser.add_argument("--days", type=int, default=0, help="相对今天的天数偏移")
     parser.add_argument("--headless", action="store_true", help="无头模式")
@@ -402,7 +402,7 @@ def main():
     date_display = target_date.strftime("%Y.%m.%d")
 
     logger.info(f"{'=' * 55}")
-    logger.info(f"  麦安研门店配货明细表 - {date_str}")
+    logger.info(f"  麦安研+焙满香门店配货差异明细表 - {date_str}")
     logger.info(f"{'=' * 55}")
 
     output_dir = OUTPUT_DIR / date_str
@@ -516,11 +516,11 @@ def main():
             logger.info(f"{'─' * 55}")
 
             stores_data = read_downloaded_data(dest)
-            formatted_output = OUTPUT_DIR / date_str / f"麦安研门店配货明细表_{date_str}.xlsx"
+            formatted_output = OUTPUT_DIR / date_str / f"麦安研+焙满香门店配货差异明细表_{date_str}.xlsx"
             merge_into_template(stores_data, TEMPLATE_FILE, formatted_output, target_date)
 
             logger.info(f"{'=' * 55}")
-            logger.info(f"  麦安研门店配货明细表全部完成！")
+            logger.info(f"  麦安研+焙满香门店配货差异明细表全部完成！")
             logger.info(f"  下载文件 → {dest}")
             logger.info(f"  格式化输出 → {formatted_output}")
             logger.info(f"{'=' * 55}\n")
