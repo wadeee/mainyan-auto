@@ -51,6 +51,7 @@ PASSWORD = "tusijia88"
 
 LOGIN_URL = "https://beta69.pospal.cn/"
 REPORT_URL = "https://css69.pospal.cn/ChainStoreSupplyReport/WarehouseDeliveryProductStoreComparison"
+DELIVERY_PRODUCT_COMPARISON_URL = "https://css69.pospal.cn/EnterpriseReport/DeliveryProductComparison"
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "工厂配送麦安研门店每日销售报表"
 TEMPLATE_FILE = Path(__file__).resolve().parent / "工厂配送麦安研门店每日销售报表_格式化模板.xlsx"
@@ -63,6 +64,13 @@ STORE_NAME_MAP = {
     "麦安研（佛山万民金海城店）": "金海城",
     "麦安研门店裱花间": "裱花间",
     "中央工厂冷加工间": "冷加工间",
+}
+
+BMX_STORE_ORDER = ["广钢", "滨江", "南州路"]
+BMX_CUSTOMER_NAME_MAP = {
+    "焙满香广钢店": "广钢",
+    "焙满香滨江店": "滨江",
+    "焙满香南州路店": "南州路",
 }
 
 TARGET_CATEGORIES = [
@@ -220,6 +228,66 @@ def read_downloaded_data(data_file):
     return store_order, products
 
 
+def read_bmx_store_data(data_file):
+    """读取仓库配送商品大客户对比表，提取焙满香三家门店数据，按商品名称透视。
+
+    返回 {商品名称: {store_short: {数量: x, 金额: y}}}
+    """
+    wb = load_workbook(data_file, data_only=True)
+    ws = wb.active
+
+    headers = {}
+    for c in range(1, ws.max_column + 1):
+        val = ws.cell(row=1, column=c).value
+        if val:
+            headers[str(val).strip()] = c
+
+    pivot = {}
+    for r in range(2, ws.max_row + 1):
+        name = ws.cell(row=r, column=headers["大客户名称"]).value
+        if name is None:
+            break
+        name = str(name).strip()
+        if name == "合计" or name == "-":
+            break
+
+        store_short = BMX_CUSTOMER_NAME_MAP.get(name)
+        if not store_short:
+            continue
+
+        product_name = str(ws.cell(row=r, column=headers["商品名称"]).value or "").strip()
+        if not product_name:
+            continue
+
+        if product_name not in pivot:
+            pivot[product_name] = {}
+        if store_short not in pivot[product_name]:
+            pivot[product_name][store_short] = {"数量": 0.0, "金额": 0.0}
+
+        qty = ws.cell(row=r, column=headers["实际销售量"]).value
+        amt = ws.cell(row=r, column=headers["实际销售金额"]).value
+        if qty:
+            try:
+                pivot[product_name][store_short]["数量"] += float(qty)
+            except (ValueError, TypeError):
+                pass
+        if amt:
+            try:
+                pivot[product_name][store_short]["金额"] += float(amt)
+            except (ValueError, TypeError):
+                pass
+
+    wb.close()
+
+    for pname in pivot:
+        for store in pivot[pname]:
+            pivot[pname][store]["数量"] = _to_num(pivot[pname][store]["数量"])
+            pivot[pname][store]["金额"] = _to_num(pivot[pname][store]["金额"])
+
+    logger.info(f"  焙满香门店数据: {len(pivot)} 个商品")
+    return pivot
+
+
 # ─── 排序 ──────────────────────────────────────────────────────────────────────
 
 
@@ -232,12 +300,28 @@ def _sort_key(product):
 # ─── 填充模板 ─────────────────────────────────────────────────────────────────
 
 
-def fill_sheet(wb, sorted_products, store_order, target_date):
+def fill_sheet(wb, sorted_products, store_order, target_date, bmx_data=None):
     ws = wb.worksheets[0]
     original_max_col = ws.max_column
 
     store_count = len(store_order)
-    max_col = 6 + store_count * 2
+
+    # 过滤焙满香门店：仅保留有非零数据的门店
+    bmx_active_order = []
+    if bmx_data:
+        for short_name in BMX_STORE_ORDER:
+            has_data = any(
+                (store.get(short_name, {}).get("数量") is not None or
+                 store.get(short_name, {}).get("金额") is not None)
+                for store in bmx_data.values()
+            )
+            if has_data:
+                bmx_active_order.append(short_name)
+        if bmx_active_order:
+            logger.info(f"  焙满香活跃门店 ({len(bmx_active_order)}): {', '.join(bmx_active_order)}")
+
+    bmx_count = len(bmx_active_order)
+    max_col = 6 + store_count * 2 + bmx_count * 2
 
     for mr in list(ws.merged_cells.ranges):
         ws.unmerge_cells(str(mr))
@@ -257,8 +341,22 @@ def fill_sheet(wb, sorted_products, store_order, target_date):
         amt_col = 8 + idx * 2
         store_columns[short_name] = (qty_col, amt_col)
 
+    # 建立焙满香门店列映射（紧接在现有门店列之后）
+    bmx_columns = {}
+    if bmx_active_order:
+        bmx_start = 7 + store_count * 2
+        for idx, short_name in enumerate(bmx_active_order):
+            qty_col = bmx_start + idx * 2
+            amt_col = bmx_start + idx * 2 + 1
+            bmx_columns[short_name] = (qty_col, amt_col)
+
     # 写入门店表头
     for short_name, (qty_col, amt_col) in store_columns.items():
+        ws.cell(row=HEADER_ROW, column=qty_col).value = f"{short_name}数量"
+        ws.cell(row=HEADER_ROW, column=amt_col).value = f"{short_name}金额"
+
+    # 写入焙满香门店表头
+    for short_name, (qty_col, amt_col) in bmx_columns.items():
         ws.cell(row=HEADER_ROW, column=qty_col).value = f"{short_name}数量"
         ws.cell(row=HEADER_ROW, column=amt_col).value = f"{short_name}金额"
 
@@ -280,6 +378,19 @@ def fill_sheet(wb, sorted_products, store_order, target_date):
                 ws.cell(row=r, column=qty_col).value = qty_val
             if amt_val is not None:
                 ws.cell(row=r, column=amt_col).value = amt_val
+
+        # 填充焙满香门店数据
+        if bmx_data:
+            product_name = product["商品名称"]
+            bmx_product = bmx_data.get(product_name, {})
+            for short_name, (qty_col, amt_col) in bmx_columns.items():
+                bmx_store = bmx_product.get(short_name, {})
+                qty_val = bmx_store.get("数量")
+                amt_val = bmx_store.get("金额")
+                if qty_val is not None:
+                    ws.cell(row=r, column=qty_col).value = qty_val
+                if amt_val is not None:
+                    ws.cell(row=r, column=amt_col).value = amt_val
 
         for col_idx in range(1, max_col + 1):
             src_idx = _style_ref_idx(col_idx, len(sample_cells))
@@ -329,7 +440,7 @@ def fill_sheet(wb, sorted_products, store_order, target_date):
 # ─── 格式化合并主函数 ──────────────────────────────────────────────────────────
 
 
-def merge_into_template(data_file, template_file, output_file, target_date):
+def merge_into_template(data_file, template_file, output_file, target_date, bmx_data=None):
     logger.info("读取下载数据...")
     store_order, products = read_downloaded_data(data_file)
 
@@ -346,8 +457,9 @@ def merge_into_template(data_file, template_file, output_file, target_date):
     logger.info(f"加载模板: {template_file}")
     wb = load_workbook(template_file)
 
-    logger.info(f"填充数据, {len(sorted_products)} 条商品, {len(store_order)} 个门店...")
-    fill_sheet(wb, sorted_products, store_order, target_date)
+    bmx_info = f", 焙满香 {len(bmx_data)} 个商品" if bmx_data else ""
+    logger.info(f"填充数据, {len(sorted_products)} 条商品, {len(store_order)} 个门店{bmx_info}...")
+    fill_sheet(wb, sorted_products, store_order, target_date, bmx_data)
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_file)
@@ -633,17 +745,65 @@ def main():
             download.save_as(dest)
             logger.info(f"  已保存到: {dest}")
 
-            # ── 步骤 2：格式化数据并生成报表 ──
+            # ── 步骤 2：下载仓库配送商品大客户对比表 ──
+            logger.info(f"{'─' * 55}")
+            logger.info(f"  步骤：下载仓库配送商品大客户对比表")
+            logger.info(f"{'─' * 55}")
+
+            logger.info("  [导航] 前往仓库配送商品大客户对比表...")
+            page.goto(DELIVERY_PRODUCT_COMPARISON_URL)
+            page.wait_for_load_state("networkidle", timeout=120_000)
+            logger.info(f"  已到达 → {page.url}")
+
+            logger.info(f"  → 设置时间: {target_date}...")
+            set_date(page, "开始日期", f"{target_date} 00:00")
+            set_date(page, "结束日期", f"{target_date} 23:59")
+
+            logger.info("  [查询] 执行查询...")
+            click_by_text(page, "查询", "查询")
+            page.wait_for_load_state("networkidle", timeout=150_000)
+            time.sleep(3)
+
+            logger.info("  [导出] 导出文件...")
+            with page.expect_download(timeout=180_000) as dl_info2:
+                result = page.evaluate("""
+                    (function() {
+                        var els = document.querySelectorAll('*');
+                        for (var i = 0; i < els.length; i++) {
+                            if (els[i].textContent.trim() === '导出' && els[i].children.length === 0) {
+                                els[i].click();
+                                return 'ok';
+                            }
+                        }
+                        return 'not found';
+                    })()
+                """)
+                logger.info(f"  点击导出: {result}")
+                if result == "not found":
+                    raise RuntimeError("未找到「导出」按钮")
+
+            download2 = dl_info2.value
+            logger.info(f"  下载文件名: {download2.suggested_filename}")
+
+            dest2 = output_dir / f"仓库配送商品大客户对比表_{date_str}.xlsx"
+            download2.save_as(dest2)
+            logger.info(f"  已保存到: {dest2}")
+
+            # ── 步骤 3：格式化数据并生成报表 ──
             logger.info(f"{'─' * 55}")
             logger.info(f"  步骤：格式化数据并生成报表")
             logger.info(f"{'─' * 55}")
 
+            logger.info("  读取焙满香门店数据...")
+            bmx_data = read_bmx_store_data(dest2)
+
             formatted_output = OUTPUT_DIR / date_str / f"工厂配送麦安研门店每日销售报表_{date_str}.xlsx"
-            merge_into_template(dest, TEMPLATE_FILE, formatted_output, target_date)
+            merge_into_template(dest, TEMPLATE_FILE, formatted_output, target_date, bmx_data)
 
             logger.info(f"{'=' * 55}")
             logger.info(f"  工厂配送麦安研门店每日销售报表全部完成！")
-            logger.info(f"  下载文件 → {dest}")
+            logger.info(f"  仓库配送商品门店对比表 → {dest}")
+            logger.info(f"  仓库配送商品大客户对比表 → {dest2}")
             logger.info(f"  格式化输出 → {formatted_output}")
             logger.info(f"{'=' * 55}\n")
 

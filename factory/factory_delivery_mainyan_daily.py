@@ -305,7 +305,22 @@ def fill_sheet(wb, sorted_products, store_order, target_date, bmx_data=None):
     original_max_col = ws.max_column
 
     store_count = len(store_order)
-    bmx_count = len(BMX_STORE_ORDER) if bmx_data else 0
+
+    # 过滤焙满香门店：仅保留有非零数据的门店
+    bmx_active_order = []
+    if bmx_data:
+        for short_name in BMX_STORE_ORDER:
+            has_data = any(
+                (store.get(short_name, {}).get("数量") is not None or
+                 store.get(short_name, {}).get("金额") is not None)
+                for store in bmx_data.values()
+            )
+            if has_data:
+                bmx_active_order.append(short_name)
+        if bmx_active_order:
+            logger.info(f"  焙满香活跃门店 ({len(bmx_active_order)}): {', '.join(bmx_active_order)}")
+
+    bmx_count = len(bmx_active_order)
     max_col = 6 + store_count * 2 + bmx_count * 2
 
     for mr in list(ws.merged_cells.ranges):
@@ -328,9 +343,9 @@ def fill_sheet(wb, sorted_products, store_order, target_date, bmx_data=None):
 
     # 建立焙满香门店列映射（紧接在现有门店列之后）
     bmx_columns = {}
-    if bmx_data:
+    if bmx_active_order:
         bmx_start = 7 + store_count * 2
-        for idx, short_name in enumerate(BMX_STORE_ORDER):
+        for idx, short_name in enumerate(bmx_active_order):
             qty_col = bmx_start + idx * 2
             amt_col = bmx_start + idx * 2 + 1
             bmx_columns[short_name] = (qty_col, amt_col)
