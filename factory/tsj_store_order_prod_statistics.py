@@ -1,5 +1,5 @@
 """
-兔司家门店订购商品统计 - 自动导出 & 格式化脚本
+兔司家门店订购商品统计表 - 自动导出 & 格式化脚本
 =====================================
 依赖：pip install playwright openpyxl && playwright install chromium
 
@@ -7,10 +7,10 @@
 并填入格式化模板生成统计表。
 
 用法：
-    python tsj_prod_order_statistics.py                    # 导出后天的数据
-    python tsj_prod_order_statistics.py --date 2026.05.30  # 指定日期
-    python tsj_prod_order_statistics.py --days 2           # N天后（默认2=后天）
-    python tsj_prod_order_statistics.py --headless         # 无头模式（不显示浏览器）
+    python tsj_store_order_prod_statistics.py                    # 导出后天的数据
+    python tsj_store_order_prod_statistics.py --date 2026.05.30  # 指定日期
+    python tsj_store_order_prod_statistics.py --days 2           # N天后（默认2=后天）
+    python tsj_store_order_prod_statistics.py --headless         # 无头模式（不显示浏览器）
 """
 
 import argparse
@@ -32,7 +32,7 @@ LOG_DIR = Path(__file__).resolve().parent / "log"
 LOG_DIR.mkdir(exist_ok=True)
 
 _file_handler = logging.handlers.TimedRotatingFileHandler(
-    LOG_DIR / "tsj_prod_order_statistics.log",
+    LOG_DIR / "tsj_store_order_prod_statistics.log",
     when="midnight",
     backupCount=30,
     encoding="utf-8",
@@ -54,7 +54,7 @@ PASSWORD = "tusijia88"
 LOGIN_URL = "https://beta69.pospal.cn/"
 ORDER_PRODUCT_REPORT_URL = "https://beta69.pospal.cn/EnterpriseReport/OrderProductReport"
 
-OUTPUT_DIR = Path(__file__).resolve().parent / "兔司家门店订购商品统计"
+OUTPUT_DIR = Path(__file__).resolve().parent / "兔司家门店订购商品统计表"
 
 TARGET_CATEGORIES = [
     "配送费",
@@ -68,7 +68,7 @@ TARGET_CATEGORIES = [
 
 REPORT_EXCLUDED_STORES = {"焙满香滨江店", "焙满香广钢店", "焙满香南州路店"}
 
-TEMPLATE_FILE = Path(__file__).resolve().parent / "兔司家门店订购商品统计_格式化模板.xlsx"
+TEMPLATE_FILE = Path(__file__).resolve().parent / "兔司家门店订购商品统计表_格式化模板.xlsx"
 
 EXPORT_CATEGORY_MAP = {
     "面团": ["冷冻面团", "面团现烤类", "面团包装类", "面团丹麦类", "面团吐司类", "面团定制款类"],
@@ -584,7 +584,7 @@ def export_and_save(page, target_date: str, file_prefix: str, *, confirm_after_e
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Pospal 兔司家门店订购商品统计自动导出")
+    parser = argparse.ArgumentParser(description="Pospal 兔司家门店订购商品统计表自动导出")
     parser.add_argument("--date", type=str, help="指定日期，格式 YYYY.MM.DD，如 2026.05.30")
     parser.add_argument("--days", type=int, default=2, help="今天之后第N天（默认2=后天）")
     parser.add_argument("--headless", action="store_true", help="无头模式（不显示浏览器窗口）")
@@ -597,7 +597,7 @@ def main():
         target_date = target_dt.strftime("%Y.%m.%d")
 
     logger.info(f"{'=' * 55}")
-    logger.info(f"  Pospal 兔司家门店订购商品统计")
+    logger.info(f"  Pospal 兔司家门店订购商品统计表")
     logger.info(f"  目标日期：{target_date}")
     logger.info(f"  输出根目录：{OUTPUT_DIR}")
     logger.info(f"{'=' * 55}")
@@ -624,19 +624,19 @@ def main():
         try:
             login(page)
 
-            # ── 任务 1：兔司家门店订购商品统计 ──
+            # ── 任务 1：兔司家门店订购商品统计表 ──
             logger.info(f"{'─' * 55}")
-            logger.info(f"  任务 1/2：下载兔司家门店订购商品统计")
+            logger.info(f"  任务 1/2：下载兔司家门店订购商品统计表")
             logger.info(f"{'─' * 55}")
 
-            navigate_to_board(page, ORDER_PRODUCT_REPORT_URL, "兔司家门店订购商品统计")
+            navigate_to_board(page, ORDER_PRODUCT_REPORT_URL, "兔司家门店订购商品统计表")
             setup_filters(page, target_date)
             report_row_count = search_and_count_rows(page, target_date)
             report_path = export_and_save(page, target_date, "大客户订购商品统计表", confirm_after_export=True)
 
             logger.info(f"{'=' * 55}")
             logger.info(f"  下载完成！")
-            logger.info(f"  兔司家门店订购商品统计：{report_row_count} 行 → {report_path}")
+            logger.info(f"  兔司家门店订购商品统计表：{report_row_count} 行 → {report_path}")
             logger.info(f"{'=' * 55}\n")
 
             # ── 任务 2：格式化（按分类分表）──
@@ -647,7 +647,7 @@ def main():
             date_str = target_date.replace(".", "-")
             report_stores, report_rows = read_report_data(report_path)
 
-            all_output = OUTPUT_DIR / date_str / f"兔司家门店订购商品统计_格式化_全部_{date_str}.xlsx"
+            all_output = OUTPUT_DIR / date_str / f"兔司家门店订购商品统计表_格式化_全部_{date_str}.xlsx"
             merge_into_template(
                 report_stores, report_rows,
                 TEMPLATE_FILE, all_output,
@@ -666,7 +666,7 @@ def main():
                     logger.info(f"  [{export_name}] 无数据，跳过")
                     continue
 
-                output_file = OUTPUT_DIR / date_str / f"兔司家门店订购商品统计_{export_name}_{date_str}.xlsx"
+                output_file = OUTPUT_DIR / date_str / f"兔司家门店订购商品统计表_{export_name}_{date_str}.xlsx"
                 merge_into_template(
                     report_stores, filtered_rows,
                     TEMPLATE_FILE, output_file,
