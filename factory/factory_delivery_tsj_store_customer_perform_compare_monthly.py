@@ -252,16 +252,14 @@ def merge_delivery_into_template(delivery_rows, template_file: Path,
         src_idx = min(col_idx - 1, len(totals_cells) - 1)
         copy_cell_style(totals_cells[src_idx], ws.cell(row=tr, column=col_idx))
 
-    date_sheet = f"{first_day.month}.{first_day.day}-{last_day.month}.{last_day.day}"
-    old_sheet_name = ws.title
-    new_sheet_name = re.sub(r'\d{1,2}\.\d{1,2}-\d{1,2}\.\d{1,2}', date_sheet, old_sheet_name)
-    ws.title = new_sheet_name
+    y = first_day.year
+    date_pattern = r'\d{4}年\d{1,2}月\d{1,2}日至\d{1,2}月\d{1,2}日'
+    date_replacement = f"{y}年{first_day.month}月{first_day.day}日至{last_day.month}月{last_day.day}日"
+
+    ws.title = re.sub(date_pattern, date_replacement, ws.title)
 
     cell_a1 = ws.cell(row=1, column=1)
     if cell_a1.value:
-        y = first_day.year
-        date_pattern = r'\d{4}年\d{1,2}月\d{1,2}日至\d{1,2}月\d{1,2}日'
-        date_replacement = f"{y}年{first_day.month}月{first_day.day}日至{last_day.month}月{last_day.day}日"
 
         if isinstance(cell_a1.value, CellRichText):
             new_blocks = []
