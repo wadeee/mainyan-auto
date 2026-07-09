@@ -584,7 +584,6 @@ def fill_sales_ranking_sheet(wb, sorted_products):
     # 恢复 S3 合并单元格（仅 A-H 范围）
     last_col_letter = get_column_letter(s3_max_col)
     ws.merge_cells(f"A1:{last_col_letter}1")
-    ws.merge_cells("G2:H2")
     ws.merge_cells("A3:F3")
 
 
