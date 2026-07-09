@@ -626,7 +626,7 @@ def _fill_single_s3(ws, store_products, short_name, monday, sunday, brand="麦�
         ws.cell(row=TOTALS_ROW, column=7).value = 0
         ws.cell(row=TOTALS_ROW, column=8).value = 0
 
-    ws.title = f"配送{short_name}店产品销售排行表"
+    ws.title = f"配送{short_name}店商品销售排行表"
     ws.cell(row=HEADER_ROW, column=7).value = f"{short_name}数量"
     ws.cell(row=HEADER_ROW, column=8).value = f"{short_name}金额"
 
