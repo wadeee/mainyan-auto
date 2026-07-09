@@ -57,6 +57,8 @@ DELIVERY_COMPARISON_URL = "https://css69.pospal.cn/EnterpriseReport/DeliveryComp
 OUTPUT_DIR = Path(__file__).resolve().parent / "工厂配送兔司家门店客户月度业绩对比表"
 TEMPLATE_FILE = Path(__file__).resolve().parent / "工厂配送兔司家门店客户月度业绩对比表_格式化模板.xlsx"
 
+IGNORED_CUSTOMERS = {"焙满香南州路店", "焙满香滨江店", "焙满香广钢店"}
+
 HEADER_ROW = 2
 TOTALS_ROW = 3
 DATA_START_ROW = 4
@@ -712,14 +714,19 @@ def main():
 
             logger.info("  读取仓库配送大客户对比表...")
             delivery_rows = read_delivery_comparison(dest)
+            delivery_rows = [r for r in delivery_rows if r["大客户名称"] not in IGNORED_CUSTOMERS]
             logger.info(f"  共 {len(delivery_rows)} 个大客户")
 
             logger.info("  读取配送费数据...")
             fee_data = read_delivery_fee(dest_fee)
+            for _ign in IGNORED_CUSTOMERS:
+                fee_data.pop(_ign, None)
             logger.info(f"  共 {len(fee_data)} 条配送费数据")
 
             logger.info("  读取自产品数据...")
             self_product_data = read_self_product(dest_self)
+            for _ign in IGNORED_CUSTOMERS:
+                self_product_data.pop(_ign, None)
             logger.info(f"  共 {len(self_product_data)} 条自产品数据")
 
             formatted_output = OUTPUT_DIR / date_range_str / f"工厂配送兔司家门店客户月度业绩对比表_{date_range_str}.xlsx"
