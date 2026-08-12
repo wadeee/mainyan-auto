@@ -2252,7 +2252,7 @@ def _run_jyb_task(args, target, target_str, date_label, output_dir):
                             : parseFloat(tds[2].textContent.trim().replace(/,/g, '')) || 0;
                         var promotion = parseFloat(tds[3].textContent.trim().replace(/,/g, '')) || 0;
                         var service = parseFloat(tds[4].textContent.trim().replace(/,/g, '')) || 0;
-                        var other = parseFloat(tds[8].textContent.trim().replace(/,/g, '')) || 0;
+                        var other = parseFloat(tds[7].textContent.trim().replace(/,/g, '')) || 0;
                         result.push({
                             storeName: storeName,
                             price: price,
