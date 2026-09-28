@@ -1,7 +1,7 @@
 @echo off
 
 start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" ^
-    --remote-debugging-port=9226 ^
+    --remote-debugging-port=9004 ^
     --user-data-dir="C:\ChromeDebug_MTJYB" ^
     --new-window ^
     "https://ecom.meituan.com/meishi" ^

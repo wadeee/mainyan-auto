@@ -2381,7 +2381,7 @@ def _run_zhaohang_task(args, target, target_str, date_label, output_dir):
 
     with sync_playwright() as pw:
         try:
-            zh_browser, zh_page = _connect_cdp_with_retry(pw, 9226)
+            zh_browser, zh_page = _connect_cdp_with_retry(pw, 9004)
 
             for zh_idx, zh_config in enumerate(ZHAOHANG_STORE_CONFIG):
                 zh_store_short = zh_config["store_short"]
@@ -2421,7 +2421,7 @@ def _run_douyin_task(args, target, target_str, date_label, output_dir):
 
     with sync_playwright() as pw:
         try:
-            dy_browser, dy_page = _connect_cdp_with_retry(pw, 9226)
+            dy_browser, dy_page = _connect_cdp_with_retry(pw, 9004)
 
             logger.info(f"{TAG}  [导航] 前往抖音每日收益页面...")
             dy_page.goto(DOUYIN_DAILY_BENEFITS_URL)
@@ -2472,7 +2472,7 @@ def _run_koubei_task(args, target, target_str, date_label, output_dir):
 
     with sync_playwright() as pw:
         try:
-            kb_browser, kb_page = _connect_cdp_with_retry(pw, 9226)
+            kb_browser, kb_page = _connect_cdp_with_retry(pw, 9004)
 
             logger.info(f"{TAG}  [导航] 前往高德口碑账单汇总页...")
             kb_page.goto(KOUBEI_BILL_URL)
