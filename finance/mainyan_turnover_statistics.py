@@ -88,17 +88,17 @@ KOUBEI_BILL_URL = "https://e.koubei.com/kb-pc/finance-mono/merchant/bill/realtim
 MEITUAN_STORE_CONFIG = [
     {
         "store_short": "宝泰店",
-        "port": 9223,
+        "port": 9001,  # 修改为不在 Windows 保留范围内的端口
         "user_data_dir": r"C:\ChromeDebug_BT",
     },
     {
         "store_short": "龙江店",
-        "port": 9224,
+        "port": 9002,  # 修改为不在 Windows 保留范围内的端口（原 9224 被 Windows 保留）
         "user_data_dir": r"C:\ChromeDebug_LJ",
     },
     {
         "store_short": "杏坛店",
-        "port": 9225,
+        "port": 9003,  # 修改为不在 Windows 保留范围内的端口
         "user_data_dir": r"C:\ChromeDebug_XT",
     },
 ]
@@ -182,7 +182,7 @@ DOUYIN_CSV_FIELDS = ["订单实收", "佣金/服务费支出"]
 
 WEEKDAY_NAMES = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
 
-CDP_PORTS = {cfg["port"] for cfg in MEITUAN_STORE_CONFIG} | {9226}
+CDP_PORTS = {cfg["port"] for cfg in MEITUAN_STORE_CONFIG} | {9004}
 
 
 # ─── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -211,7 +211,12 @@ def retry_until_success(fn, description, max_retries=10, retry_delay=5):
 def _connect_cdp_with_retry(pw, port, max_retries=12, interval=5):
     for attempt in range(1, max_retries + 1):
         try:
-            browser = pw.chromium.connect_over_cdp(f"http://localhost:{port}")
+            # 明确使用 127.0.0.1 而不是 localhost（避免 IPv6 问题）
+            # 通过设置空的 wsEndpoint 来绕过代理
+            browser = pw.chromium.connect_over_cdp(
+                f"http://127.0.0.1:{port}",
+                timeout=10000
+            )
             context = browser.contexts[0]
             existing_pages = context.pages[:]
             page = context.new_page()
@@ -260,18 +265,26 @@ def cleanup_stale_browsers():
 
     # 2. 查找使用 ChromeDebug 目录的 chrome.exe（可能端口未绑定但锁住了 profile）
     try:
+        # 使用 PowerShell 而不是 wmic（wmic 在某些系统上不可用）
+        ps_script = """
+        Get-WmiObject Win32_Process -Filter "name='chrome.exe'" |
+        Where-Object { $_.CommandLine -like '*ChromeDebug*' } |
+        Select-Object ProcessId, CommandLine |
+        ConvertTo-Json
+        """
         output = subprocess.check_output(
-            ["wmic", "process", "where", "name='chrome.exe'", "get", "processid,commandline"],
-            text=True, errors="replace", timeout=10,
+            ["powershell", "-NoProfile", "-Command", ps_script],
+            text=True, errors="replace", timeout=15,
         )
-        for line in output.splitlines():
-            if "ChromeDebug" in line:
-                parts = line.strip().split()
-                try:
-                    pid = int(parts[-1])
-                except (ValueError, IndexError):
-                    continue
-                if pid > 0 and pid not in killed_pids:
+        if output.strip() and output.strip() != "null":
+            import json
+            processes = json.loads(output)
+            # 确保 processes 是列表
+            if isinstance(processes, dict):
+                processes = [processes]
+            for proc in processes:
+                pid = proc.get("ProcessId")
+                if pid and pid > 0 and pid not in killed_pids:
                     logger.info(f"  发现 ChromeDebug chrome.exe PID {pid}，终止进程树...")
                     subprocess.run(
                         ["taskkill", "/F", "/T", "/PID", str(pid)],
@@ -1648,13 +1661,32 @@ def save_koubei_bill_csv(data, store_short, date_label, output_dir):
 
 
 def _launch_chrome(port, user_data_dir, headless=False):
-    process = subprocess.Popen([
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        *(["--headless=new"] if headless else []),
-        f"--remote-debugging-port={port}",
-        f"--user-data-dir={user_data_dir}",
-    ])
-    time.sleep(3)
+    # 创建日志文件路径
+    log_file = LOG_DIR / f"chrome_debug_{port}.log"
+
+    try:
+        with open(log_file, "w", encoding="utf-8") as log:
+            process = subprocess.Popen([
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                *(["--headless=new"] if headless else []),
+                f"--remote-debugging-port={port}",
+                "--remote-debugging-address=127.0.0.1",  # 明确指定 IPv4 地址
+                f"--user-data-dir={user_data_dir}",
+                "--disable-features=RendererCodeIntegrity",  # 避免某些兼容性问题
+                "--no-first-run",  # 跳过首次运行向导
+                "--no-default-browser-check",  # 跳过默认浏览器检查
+                "--disable-gpu",  # 禁用 GPU 加速（某些环境下更稳定）
+                "--disable-dev-shm-usage",  # 避免共享内存问题
+            ],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            )
+            logger.info(f"  Chrome 已启动 (PID={process.pid}, port={port})，日志: {log_file}")
+    except Exception as e:
+        logger.error(f"  启动 Chrome 失败: {e}")
+        raise
+
+    time.sleep(5)  # 增加等待时间，让 Chrome 有足够时间初始化
     return process
 
 
@@ -1921,8 +1953,37 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
                 logger.info(f"{TAG}  [导航] 前往美团推广账户详情页...")
                 chrome_page.goto(MEITUAN_AD_URL)
                 chrome_page.wait_for_load_state("networkidle", timeout=120_000)
-                chrome_page.wait_for_selector('.panel-body table tbody tr', timeout=30000)
+
+                # 等待页面加载完成，可能是表格数据或"暂无消费记录"提示
+                try:
+                    chrome_page.wait_for_selector('.panel-body table tbody tr, .no-record', timeout=30000)
+                except Exception:
+                    logger.warning(f"{TAG}  未检测到表格或无数据提示，继续...")
+
                 time.sleep(5)
+
+                # 检查是否有数据
+                has_data = chrome_page.evaluate("""
+                    (function() {
+                        var noRecord = document.querySelector('.no-record');
+                        if (noRecord && noRecord.offsetParent !== null) {
+                            return false;  // 显示"暂无消费记录"
+                        }
+                        var rows = document.querySelectorAll('.panel-body table tbody tr');
+                        return rows.length > 0;
+                    })()
+                """)
+
+                if not has_data:
+                    logger.info(f"{TAG}  美团推广账户显示暂无消费记录，记录为0元")
+                    # 创建空的CSV文件，表示推广消费为0元
+                    ad_csv_file = output_dir / f"美团外卖推广消费_{mt_store_short}_{date_label}.csv"
+                    with open(ad_csv_file, "w", newline="", encoding="utf-8-sig") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(["时间", "类型", "变化金额(元)"])
+                    logger.info(f"{TAG}  已保存推广消费CSV(0元): {ad_csv_file.name}")
+                    return
+
 
                 logger.info(f"{TAG}  → 逐页查找 {date_label} 的推广消费数据...")
                 ad_found_rows = []
@@ -2015,7 +2076,13 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
                             writer.writerow([r["时间"], r["类型"], r["变化金额(元)"]])
                     logger.info(f"{TAG}  已保存推广消费CSV: {ad_csv_file.name}")
                 else:
-                    logger.warning(f"{TAG}  未找到 {date_label} 的推广消费数据（该日可能无推广消费）")
+                    logger.info(f"{TAG}  未找到 {date_label} 的推广消费数据，记录为0元")
+                    # 创建空的CSV文件，表示推广消费为0元
+                    ad_csv_file = output_dir / f"美团外卖推广消费_{mt_store_short}_{date_label}.csv"
+                    with open(ad_csv_file, "w", newline="", encoding="utf-8-sig") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(["时间", "类型", "变化金额(元)"])
+                    logger.info(f"{TAG}  已保存推广消费CSV(0元): {ad_csv_file.name}")
 
             retry_until_success(_do_meituan_ad, f"美团推广消费-{mt_store_short}")
 
@@ -2137,7 +2204,7 @@ def _run_jyb_task(args, target, target_str, date_label, output_dir):
 
     with sync_playwright() as pw:
         try:
-            jyb_browser, jyb_page = _connect_cdp_with_retry(pw, 9226)
+            jyb_browser, jyb_page = _connect_cdp_with_retry(pw, 9004)
 
             logger.info(f"{TAG}  [导航] 前往美团经营宝每日收益页...")
             jyb_page.goto(MEITUAN_JYB_URL)
@@ -2452,8 +2519,8 @@ def _run_koubei_task(args, target, target_str, date_label, output_dir):
 
 
 def run_shared_chrome_tasks(args, target, target_str, date_label, output_dir):
-    logger.info("  启动共享 Chrome (port=9226)...")
-    chrome_process = _launch_chrome(9226, r"C:\ChromeDebug_MTJYB", args.headless)
+    logger.info("  启动共享 Chrome (port=9004)...")
+    chrome_process = _launch_chrome(9004, r"C:\ChromeDebug_MTJYB", args.headless)
     try:
         retry_until_success(
             lambda: _run_jyb_task(args, target, target_str, date_label, output_dir),
@@ -2472,7 +2539,7 @@ def run_shared_chrome_tasks(args, target, target_str, date_label, output_dir):
             "口碑"
         )
     finally:
-        logger.info("  关闭共享 Chrome (port=9226)...")
+        logger.info("  关闭共享 Chrome (port=9004)...")
         if chrome_process:
             _kill_process_tree(chrome_process)
 
@@ -2502,6 +2569,16 @@ def run_formatting(target, output_dir, date_label):
 
 
 def main():
+    # 禁用代理，避免连接本地 CDP 端口时使用代理
+    import os
+    proxy_vars = ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY']
+    for var in proxy_vars:
+        if var in os.environ:
+            del os.environ[var]
+    # 设置 NO_PROXY 确保本地连接不走代理
+    os.environ['NO_PROXY'] = '127.0.0.1,localhost'
+    os.environ['no_proxy'] = '127.0.0.1,localhost'
+
     parser = argparse.ArgumentParser(description="麦安研营业统计自动化脚本")
     parser.add_argument("--days", type=int, default=0, help="日期偏移量：0=今天，-1=昨天（默认0）")
     parser.add_argument("--date", type=str, help="指定目标日期，格式 YYYY.MM.DD")
