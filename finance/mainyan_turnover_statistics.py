@@ -978,8 +978,8 @@ def scrape_zhaohang_daily_summary(page, target_str, date_label, zh_config, outpu
     return zh_data
 
 
-def select_unionpay_store(page, config):
-    """在银豹付交易账单页面选择门店（Element UI Cascader 多选组件）。"""
+def _select_unionpay_store_cascader(page, config):
+    """旧版页面：Element UI Cascader 多选组件。"""
     logger.info(f"  → 选择银豹付门店: {config['select_items']}")
 
     cascader = page.locator(".el-cascader")
@@ -1082,6 +1082,134 @@ def select_unionpay_store(page, config):
 
     page.locator("body").click(position={"x": 0, "y": 0})
     page.wait_for_selector(".el-cascader__dropdown", state="hidden", timeout=5000)
+
+
+def _open_store_dialog(page, trigger):
+    """点击「筛选门店」打开门店选择弹窗，并等待树渲染完成。"""
+    dialog = page.locator(".store-select-dialog .el-dialog").first
+    for attempt in range(1, 4):
+        try:
+            trigger.first.click()
+            dialog.wait_for(state="visible", timeout=8000)
+            page.wait_for_selector(
+                ".store-select-dialog .el-tree-node__label", state="visible", timeout=8000
+            )
+            page.wait_for_timeout(300)
+            return dialog
+        except Exception as e:
+            logger.warning(f"    打开门店弹窗失败 ({attempt}/3): {type(e).__name__}: {e}")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(1000)
+    raise RuntimeError("无法打开「选择门店」弹窗")
+
+
+def _clear_store_dialog_selection(page, dialog):
+    """清空弹窗中所有已勾选的门店（页面默认是全选状态）。"""
+    marked = (
+        ".el-tree-node__content .el-checkbox__input.is-checked, "
+        ".el-tree-node__content .el-checkbox__input.is-indeterminate"
+    )
+    select_all = dialog.locator(".store-select-dialog__footer-left .el-checkbox__inner")
+    root_box = dialog.locator(
+        ".el-tree > .el-tree-node > .el-tree-node__content .el-checkbox__inner"
+    )
+    for _ in range(3):
+        if dialog.locator(marked).count() == 0:
+            break
+        # 全选状态点一次即可清空；半选状态第一次点击会变成全选，循环再点一次
+        if select_all.count() > 0:
+            select_all.first.click()
+        elif root_box.count() > 0:
+            root_box.first.click()
+        else:
+            break
+        page.wait_for_timeout(300)
+
+    remaining = dialog.locator(".el-tree-node__content .el-checkbox__input.is-checked").count()
+    if remaining > 0:
+        raise RuntimeError(f"清空门店选择失败，仍有 {remaining} 个节点处于勾选状态")
+    logger.info("    已清空原有选择")
+
+
+def _check_store_tree_node(page, dialog, item_name):
+    """在门店树中按名称勾选一个节点。"""
+    labels = dialog.locator(".el-tree-node__content .el-tree-node__label")
+    total = labels.count()
+    names, matches = [], []
+    for i in range(total):
+        text = labels.nth(i).inner_text().strip()
+        names.append(text)
+        if text == item_name:
+            matches.append(i)
+
+    if not matches:
+        raise RuntimeError(f"门店节点未找到: {item_name}; 可选: {', '.join(names)}")
+
+    idx = matches[0]
+    if len(matches) > 1:
+        # 同名节点（如根节点「总部」与其同名子节点）优先选叶子节点
+        for i in matches:
+            content = labels.nth(i).locator(
+                "xpath=ancestor::div[contains(@class,'el-tree-node__content')][1]"
+            )
+            if content.locator(".el-tree-node__expand-icon.is-leaf").count() > 0:
+                idx = i
+                break
+
+    content = labels.nth(idx).locator(
+        "xpath=ancestor::div[contains(@class,'el-tree-node__content')][1]"
+    )
+    checkbox = content.locator(".el-checkbox__input").first
+    if "is-checked" in (checkbox.get_attribute("class") or ""):
+        logger.info(f"    已勾选(跳过): {item_name}")
+        return
+
+    content.locator(".el-checkbox__inner").first.click()
+    page.wait_for_timeout(200)
+    if "is-checked" not in (checkbox.get_attribute("class") or ""):
+        raise RuntimeError(f"勾选门店失败: {item_name}")
+    logger.info(f"    勾选: {item_name}")
+
+
+def select_unionpay_store(page, config):
+    """在银豹付交易账单页面选择门店。
+
+    新版页面为「筛选门店」弹窗（.store-select-dialog 树形多选），
+    旧版为 Element UI Cascader，这里自动识别并走对应分支。
+    """
+    logger.info(f"  → 选择银豹付门店: {config['select_items']}")
+
+    trigger = page.locator(".store-filter-row__input")
+    if trigger.count() == 0:
+        logger.info("    未发现新版筛选门店入口，回退旧版 cascader 流程")
+        return _select_unionpay_store_cascader(page, config)
+
+    dialog = _open_store_dialog(page, trigger)
+    _clear_store_dialog_selection(page, dialog)
+
+    for item_name in config["select_items"]:
+        _check_store_tree_node(page, dialog, item_name)
+
+    checked = dialog.locator(".el-tree-node__content .el-checkbox__input.is-checked").count()
+    logger.info(f"    弹窗内共勾选 {checked} 个节点，点击确定")
+
+    dialog.locator(".store-select-dialog__footer-right .el-button--primary").first.click()
+    page.wait_for_selector(".store-select-dialog .el-dialog", state="hidden", timeout=10000)
+    page.wait_for_timeout(300)
+
+    text_el = page.locator(".store-filter-row__text")
+    if text_el.count() > 0:
+        logger.info(f"    当前筛选门店: {text_el.first.inner_text().strip()}")
+
+
+def click_unionpay_search(page):
+    """点击银豹付账单页面的「搜索」按钮（避开弹窗内的同名按钮）。"""
+    btn = page.locator(".store-filter-row button.el-button--primary")
+    if btn.count() > 0:
+        btn.first.click()
+        logger.info("  [搜索] → 已点击筛选栏搜索按钮")
+        return True
+    return click_by_text(page, "搜索", "搜索")
 
 
 def select_store_type_consumption(page):
@@ -1785,12 +1913,14 @@ def run_pospal_tasks(args, target, target_str, date_label, output_dir):
                     logger.info(f"{TAG}  门店 {i + 1}/{len(UNIONPAY_STORE_CONFIG)}: {ss}")
                     page.goto(UNIONPAY_BILL_URL)
                     page.wait_for_load_state("networkidle", timeout=120_000)
-                    page.wait_for_selector(".el-cascader", timeout=30000)
+                    page.wait_for_selector(
+                        ".store-filter-row__input, .el-cascader", timeout=30000
+                    )
                     set_vue_date(page, target_str)
                     time.sleep(1)
                     select_unionpay_store(page, cfg)
                     time.sleep(0.5)
-                    click_by_text(page, "搜索", "搜索")
+                    click_unionpay_search(page)
                     page.wait_for_load_state("networkidle", timeout=150_000)
                     page.wait_for_selector(".data-dz-item", timeout=30000)
                     time.sleep(5)
