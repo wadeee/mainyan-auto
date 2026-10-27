@@ -2037,7 +2037,46 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
                 chrome_page.locator("body").click(position={"x": 0, "y": 0})
 
                 logger.info(f"{TAG}  等待数据刷新...")
-                chrome_page.wait_for_selector('.bill-charge-table tfoot', timeout=30000)
+                bill_has_data = True
+                try:
+                    chrome_page.wait_for_selector('.bill-charge-table tfoot', timeout=30000)
+                except Exception:
+                    # 当天没有任何订单时，账单页不会渲染明细表格（没有 tfoot），
+                    # 这里确认页面确实处于“无数据”状态，避免把加载失败 / 日期未生效误记成 0。
+                    page_state = chrome_page.evaluate("""
+                        (function() {
+                            var dateInput = document.querySelector('.select-input-wrapper .roo-input');
+                            var table = document.querySelector('.bill-charge-table');
+                            var rows = document.querySelectorAll('.bill-charge-table tbody tr');
+                            var bodyText = document.body.innerText || '';
+                            return {
+                                dateValue: dateInput ? dateInput.value : '',
+                                hasTable: !!table,
+                                rowCount: rows.length,
+                                emptyText: /暂无数据|暂无账单|无数据|无账单|没有账单/.test(bodyText)
+                            };
+                        })()
+                    """)
+                    date_value = page_state.get("dateValue") or ""
+                    date_ok = any(
+                        d in date_value
+                        for d in (date_label, date_label.replace("-", "."), date_label.replace("-", "/"))
+                    )
+                    is_empty = date_ok and (
+                        page_state.get("emptyText")
+                        or not page_state.get("hasTable")
+                        or page_state.get("rowCount") == 0
+                    )
+                    if not is_empty:
+                        raise RuntimeError(
+                            "未找到账单明细表格(tfoot)，"
+                            f"页面状态: {json.dumps(page_state, ensure_ascii=False)}"
+                        )
+                    bill_has_data = False
+                    logger.info(
+                        f"{TAG}  {date_label} 无账单数据，按 0 元记录"
+                        f"（页面状态: {json.dumps(page_state, ensure_ascii=False)}）"
+                    )
                 time.sleep(5)
 
                 logger.info(f"{TAG}  → 抓取账单数据...")
@@ -2065,9 +2104,13 @@ def _run_meituan_waimai_store(mt_config, args, target_str, date_label, output_di
                         return result;
                     })()
                 """)
+                meituan_csv_fields = ["商品总价", "打包费", "商家对顾客的活动补贴", "佣金", "配送服务费", "其他类"]
+                if not bill_has_data:
+                    # 无数据日：所有项目都按 0 元写入
+                    for key in meituan_csv_fields:
+                        bill_data.setdefault(key, 0)
                 logger.info(f"{TAG}  抓取数据: {json.dumps(bill_data, ensure_ascii=False)}")
 
-                meituan_csv_fields = ["商品总价", "打包费", "商家对顾客的活动补贴", "佣金", "配送服务费", "其他类"]
                 csv_file = output_dir / f"账单明细_{mt_store_short}_{date_label}.csv"
                 with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
                     writer = csv.writer(f)
