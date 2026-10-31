@@ -68,7 +68,7 @@ TARGET_CATEGORIES = [
 
 REPORT_EXCLUDED_STORES = {"焙满香滨江店", "焙满香广钢店", "焙满香南州路店"}
 
-TEMPLATE_FILE = Path(__file__).resolve().parent / "兔司家门店订购商品统计表_格式化模板.xlsx"
+TEMPLATE_FILE = Path(__file__).resolve().parent / "兔司家门店订购商品统计表_格式化模板_new.xlsx"
 
 EXPORT_CATEGORY_MAP = {
     "面团": ["冷冻面团", "面团现烤类", "面团包装类", "面团丹麦类", "面团吐司类", "面团定制款类"],
@@ -80,10 +80,36 @@ EXPORT_CATEGORY_MAP = {
                  "保洁用品", "配送费"],
 }
 
-HEADER_ROW = 2
-SAMPLE_ROW = 3
-TOTALS_ROW = 4
-DATA_START_ROW = 3
+HEADER_ROW = 7              # 表头行（序号/商品分类/商品名称/规格/单位/合计/门店...）
+DATA_START_ROW = 8          # 数据起始行
+SAMPLE_ROW_START = 8        # 模板示例数据行（8-9 行）
+TEMPLATE_TOTALS_ROW = 10    # 模板里的「合计」行（A:E 合并）
+TEMPLATE_FOOTER_ROW = 12    # 模板里的「配货员：」行
+TOTALS_LABEL = "合计"
+FOOTER_ROW_OFFSET = 2       # 合计行往下 2 行为「配货员：」
+FOOTER_TEXT = "配货员："
+
+# 金额汇总区：模板第 2-5 行按品类分行，第 6 行为合计下单金额
+AMOUNT_ROW_START = 2
+AMOUNT_TOTAL_ROW = 6
+
+# 商品分类 → 金额汇总行（与模板 D 列标签对应）
+AMOUNT_ROW_CATEGORY_MAP = {
+    2: ["冷冻面团", "面团现烤类", "面团包装类", "面团丹麦类", "面团吐司类", "面团定制款类"],
+    3: ["成品面包类", "饼干类", "蛋糕类", "冻品慕斯类"],
+    4: ["热销类", "慕斯类/外", "冷冻肉类", "冷冻馅料类", "冷藏馅料类", "油脂类", "粉类", "糖类", "常温馅料类",
+        "干果类", "饼干类/外", "饮品类/外", "其他/外", "专版包材类", "公版包材类", "工衣工帽围裙", "模具", "保洁用品"],
+    5: ["配送费"],
+}
+
+# 报表可能返回上级分类名 → 金额汇总行
+REPORT_CATEGORY_TO_AMOUNT_ROW = {
+    "蛋糕及面包成品及饼干类": 3,
+    "原料铺料": 4,
+    "包材耗材": 4,
+    "工衣模具": 4,
+    "慕斯+饼干+饮品+其他": 4,
+}
 
 
 # ─── 格式化合并函数 ──────────────────────────────────────────────────────────
@@ -99,7 +125,10 @@ def copy_cell_style(src_cell, dst_cell):
 
 
 def read_report_data(report_file: Path):
-    """读取大客户订购商品统计表（2行表头，数据从第3行开始，门店在J/L/N...每隔2列）"""
+    """读取大客户订购商品统计表（2行表头，数据从第3行开始，门店在J/L/N...每隔2列）
+
+    门店列 c 为「订购量」，c+1 为「订购额」。
+    """
     wb = load_workbook(report_file, data_only=True)
     ws = wb.active
 
@@ -119,12 +148,18 @@ def read_report_data(report_file: Path):
         if name is None:
             continue
         quantities = {}
+        amounts = {}
         for src_col, store_name in stores:
             val = ws.cell(row=r, column=src_col).value
             try:
                 quantities[store_name] = float(val) if val else 0
             except (ValueError, TypeError):
                 quantities[store_name] = 0
+            amt = ws.cell(row=r, column=src_col + 1).value
+            try:
+                amounts[store_name] = float(amt) if amt else 0
+            except (ValueError, TypeError):
+                amounts[store_name] = 0
         if not any(quantities.values()):
             continue
         rows.append({
@@ -133,6 +168,7 @@ def read_report_data(report_file: Path):
             "spec": ws.cell(row=r, column=6).value,
             "unit": ws.cell(row=r, column=7).value,
             "quantities": quantities,
+            "amounts": amounts,
         })
 
     wb.close()
@@ -140,22 +176,61 @@ def read_report_data(report_file: Path):
     return [name for _, name in stores], rows
 
 
-def merge_into_template(report_stores, report_rows,
-                        template_file: Path, output_file: Path, target_date: str = None):
-    wb = load_workbook(template_file)
-    ws = wb.active
+def short_store_name(name) -> str:
+    """门店全称 → 模板表头简称：'兔司家（东站宝泰店）' / '兔司家东站宝泰店' → '东站宝泰店'"""
+    text = str(name).strip()
+    m = re.search(r"[（(](.+?)[）)]", text)
+    short_name = m.group(1) if m else text
+    return re.sub(r"兔司家|甜麦面包屋", "", short_name).strip()
 
-    all_stores = report_stores
-    store_count = len(all_stores)
-    last_col = 6 + store_count
-    template_max_col = ws.max_column
 
-    sample_cells = list(ws.iter_rows(min_row=SAMPLE_ROW, max_row=SAMPLE_ROW))[0]
-    sample_height = ws.row_dimensions[SAMPLE_ROW].height
-    totals_cells = list(ws.iter_rows(min_row=TOTALS_ROW, max_row=TOTALS_ROW))[0]
-    totals_height = ws.row_dimensions[TOTALS_ROW].height
+def snapshot_style(cell) -> dict:
+    """把单元格样式存成快照（模板示例行删除后仍可用）。"""
+    return {
+        "font": copy.copy(cell.font),
+        "fill": copy.copy(cell.fill),
+        "border": copy.copy(cell.border),
+        "alignment": copy.copy(cell.alignment),
+        "number_format": cell.number_format,
+    }
 
-    # 创建分类优先级映射，按照EXPORT_CATEGORY_MAP中定义的顺序
+
+def apply_style(style: dict, cell):
+    cell.font = copy.copy(style["font"])
+    cell.fill = copy.copy(style["fill"])
+    cell.border = copy.copy(style["border"])
+    cell.alignment = copy.copy(style["alignment"])
+    cell.number_format = style["number_format"]
+
+
+def build_category_amount_row_map() -> dict:
+    cat_to_row = {}
+    for row_num, categories in AMOUNT_ROW_CATEGORY_MAP.items():
+        for cat in categories:
+            cat_to_row[cat] = row_num
+    for cat, row_num in REPORT_CATEGORY_TO_AMOUNT_ROW.items():
+        cat_to_row.setdefault(cat, row_num)
+    return cat_to_row
+
+
+def compute_amount_sums(report_rows) -> dict:
+    """按门店统计各金额汇总行的下单金额，返回 {(行号, 门店): 金额}。"""
+    cat_to_row = build_category_amount_row_map()
+    sums = {}
+    for row_data in report_rows:
+        category = str(row_data["category"]).strip() if row_data["category"] is not None else ""
+        row_num = cat_to_row.get(category)
+        if row_num is None:
+            continue
+        for store_name, amount in row_data.get("amounts", {}).items():
+            if amount:
+                key = (row_num, store_name)
+                sums[key] = sums.get(key, 0) + float(amount)
+    return sums
+
+
+def sort_report_rows(report_rows):
+    """按 EXPORT_CATEGORY_MAP 中定义的分类顺序排序。"""
     category_priority = {}
     priority = 0
     for export_cats in EXPORT_CATEGORY_MAP.values():
@@ -164,115 +239,161 @@ def merge_into_template(report_stores, report_rows,
             priority += 1
     max_priority = priority
 
-    # 对数据行按照分类在EXPORT_CATEGORY_MAP中的顺序进行排序
     def get_category_priority(row_data):
         category = str(row_data["category"]).strip() if row_data["category"] is not None else ""
         return category_priority.get(category, max_priority)
 
-    all_rows = sorted(report_rows, key=get_category_priority)
-    data_count = len(all_rows)
+    return sorted(report_rows, key=get_category_priority)
 
-    ws.delete_rows(SAMPLE_ROW, 2)
-    ws.insert_rows(DATA_START_ROW, data_count + 1)
 
-    header_store_col = min(8, template_max_col)
-    for r in range(1, DATA_START_ROW):
-        src = ws.cell(row=r, column=header_store_col)
-        for col in range(header_store_col + 1, last_col + 1):
-            copy_cell_style(src, ws.cell(row=r, column=col))
+def merge_into_template(report_stores, report_rows,
+                        template_file: Path, output_file: Path,
+                        amount_sums: dict = None, target_date: str = None):
+    """把报表数据填入新模板。
 
+    模板布局：
+      1 行标题；2-5 行各品类下单金额、6 行合计下单金额（A6 下单 / C6 配送）；
+      7 行表头；8 行起为数据；数据下方 1 行为「合计」，再往下 2 行为「配货员：」。
+    """
+    wb = load_workbook(template_file)
+    ws = wb.active
+
+    store_count = len(report_stores)
+    last_col = max(6 + store_count, 7)
+    template_max_col = ws.max_column
+    first_store_letter = get_column_letter(7)
+    last_store_letter = get_column_letter(last_col)
+
+    # ── 1. 门店列：模板只预留 1 列（G），门店多时向右扩展，少时清空多余列 ──
+    if last_col > template_max_col:
+        base_letter = get_column_letter(template_max_col)
+        base_width = ws.column_dimensions[base_letter].width
+        for col in range(template_max_col + 1, last_col + 1):
+            if base_width:
+                ws.column_dimensions[get_column_letter(col)].width = base_width
+            for r in range(1, ws.max_row + 1):
+                copy_cell_style(ws.cell(row=r, column=template_max_col),
+                                ws.cell(row=r, column=col))
     for col in range(last_col + 1, template_max_col + 1):
-        for r in range(1, DATA_START_ROW):
+        for r in range(1, ws.max_row + 1):
             cell = ws.cell(row=r, column=col)
             if not isinstance(cell, MergedCell):
                 cell.value = None
 
-    for i, store_name in enumerate(all_stores):
-        cell = ws.cell(row=HEADER_ROW, column=7 + i)
-        m = re.search(r'[（(](.+?)[）)]', str(store_name))
-        short_name = m.group(1) if m else store_name
-        short_name = re.sub(r'兔司家|甜麦面包屋', '', short_name).strip()
-        cell.value = short_name
+    # ── 2. 表头门店简称 ──
+    for i, store_name in enumerate(report_stores):
+        ws.cell(row=HEADER_ROW, column=7 + i).value = short_store_name(store_name)
+    if store_count == 0:
+        ws.cell(row=HEADER_ROW, column=7).value = None
 
+    # ── 3. 金额汇总区（2-5 行分品类，6 行合计）──
+    if amount_sums is None:
+        amount_sums = compute_amount_sums(report_rows)
+    for i, store_name in enumerate(report_stores):
+        col = 7 + i
+        letter = get_column_letter(col)
+        for row_num in range(AMOUNT_ROW_START, AMOUNT_TOTAL_ROW):
+            ws.cell(row=row_num, column=col).value = round(
+                float(amount_sums.get((row_num, store_name), 0) or 0), 2
+            )
+        ws.cell(row=AMOUNT_TOTAL_ROW, column=col).value = (
+            f"=SUM({letter}{AMOUNT_ROW_START}:{letter}{AMOUNT_TOTAL_ROW - 1})"
+        )
+    for row_num in range(AMOUNT_ROW_START, AMOUNT_TOTAL_ROW + 1):
+        ws.cell(row=row_num, column=6).value = (
+            f"=SUM({first_store_letter}{row_num}:{last_store_letter}{row_num})"
+        )
+
+    # ── 4. 先保存样式快照，后面会删掉模板的示例行/合计行/页脚行 ──
+    def style_col(col):
+        return min(col, template_max_col)
+
+    sample_style = {col: snapshot_style(ws.cell(row=SAMPLE_ROW_START, column=style_col(col)))
+                    for col in range(1, last_col + 1)}
+    totals_style = {col: snapshot_style(ws.cell(row=TEMPLATE_TOTALS_ROW, column=style_col(col)))
+                    for col in range(1, last_col + 1)}
+    footer_style = snapshot_style(ws.cell(row=TEMPLATE_FOOTER_ROW, column=2))
+    sample_height = ws.row_dimensions[SAMPLE_ROW_START].height
+    totals_height = ws.row_dimensions[TEMPLATE_TOTALS_ROW].height
+    footer_height = ws.row_dimensions[TEMPLATE_FOOTER_ROW].height
+
+    # ── 5. 删除示例数据行、合计行、页脚行（其中的合并单元格先解除）──
+    for merge in list(ws.merged_cells.ranges):
+        if merge.min_row >= SAMPLE_ROW_START:
+            ws.unmerge_cells(str(merge))
+    ws.delete_rows(SAMPLE_ROW_START, ws.max_row - SAMPLE_ROW_START + 1)
+
+    # ── 6. 写入数据行 ──
+    all_rows = sort_report_rows(report_rows)
+    data_count = len(all_rows)
     for i, row_data in enumerate(all_rows):
         r = DATA_START_ROW + i
-        ws.cell(row=r, column=1).value = i + 1
-        ws.cell(row=r, column=2).value = row_data["name"]
-        ws.cell(row=r, column=3).value = row_data["category"]
+        ws.cell(row=r, column=1).value = f"=ROW()-{HEADER_ROW}"
+        ws.cell(row=r, column=2).value = row_data["category"]
+        ws.cell(row=r, column=3).value = row_data["name"]
         ws.cell(row=r, column=4).value = row_data["spec"]
         ws.cell(row=r, column=5).value = row_data["unit"]
+        ws.cell(row=r, column=6).value = f"=SUM({first_store_letter}{r}:{last_store_letter}{r})"
 
-        first_letter = get_column_letter(7)
-        last_letter = get_column_letter(last_col)
-        ws.cell(row=r, column=6).value = f"=SUM({first_letter}{r}:{last_letter}{r})"
+        for j, store_name in enumerate(report_stores):
+            qty = row_data["quantities"].get(store_name, 0) or 0
+            try:
+                qty = float(qty)
+            except (TypeError, ValueError):
+                qty = 0
+            if qty:
+                ws.cell(row=r, column=7 + j).value = int(qty) if qty == int(qty) else qty
 
-        for j, store_name in enumerate(all_stores):
-            qty = row_data["quantities"].get(store_name, 0)
-            col = 7 + j
-            if qty and float(qty) != 0:
-                val = float(qty)
-                if val == int(val):
-                    val = int(val)
-                ws.cell(row=r, column=col).value = val
-
-        for col_idx in range(1, last_col + 1):
-            if col_idx >= 7:
-                src_idx = min(7, len(sample_cells) - 1)
-            else:
-                src_idx = min(col_idx - 1, len(sample_cells) - 1)
-            copy_cell_style(sample_cells[src_idx], ws.cell(row=r, column=col_idx))
+        for col in range(1, last_col + 1):
+            apply_style(sample_style[col], ws.cell(row=r, column=col))
         if sample_height:
             ws.row_dimensions[r].height = sample_height
 
-    tr = DATA_START_ROW + data_count
-    ws.cell(row=tr, column=1).value = data_count
-    for col in [2, 3, 4, 5]:
-        ws.cell(row=tr, column=col).value = "-"
-    for col in range(6, last_col + 1):
-        letter = get_column_letter(col)
-        ws.cell(row=tr, column=col).value = f"=SUM({letter}{DATA_START_ROW}:{letter}{tr - 1})"
+    # ── 7. 合计行（A:E 合并，F 及门店列求和）──
+    totals_row = DATA_START_ROW + data_count
+    ws.cell(row=totals_row, column=1).value = TOTALS_LABEL
+    if data_count:
+        ws.cell(row=totals_row, column=6).value = f"=SUM(F{DATA_START_ROW}:F{totals_row - 1})"
+        for j in range(store_count):
+            letter = get_column_letter(7 + j)
+            ws.cell(row=totals_row, column=7 + j).value = (
+                f"=SUM({letter}{DATA_START_ROW}:{letter}{totals_row - 1})"
+            )
+    else:
+        ws.cell(row=totals_row, column=6).value = 0
 
-    for col_idx in range(1, last_col + 1):
-        if col_idx >= 7:
-            src_idx = min(7, len(totals_cells) - 1)
-        else:
-            src_idx = min(col_idx - 1, len(totals_cells) - 1)
-        copy_cell_style(totals_cells[src_idx], ws.cell(row=tr, column=col_idx))
     if totals_height:
-        ws.row_dimensions[tr].height = totals_height
+        ws.row_dimensions[totals_row].height = totals_height
+    ws.merge_cells(start_row=totals_row, start_column=1, end_row=totals_row, end_column=5)
+    for col in range(1, last_col + 1):
+        apply_style(totals_style[col], ws.cell(row=totals_row, column=col))
 
+    # ── 8. 页脚「配货员：」──
+    footer_row = totals_row + FOOTER_ROW_OFFSET
+    footer_cell = ws.cell(row=footer_row, column=2)
+    footer_cell.value = FOOTER_TEXT
+    apply_style(footer_style, footer_cell)
+    if footer_height:
+        ws.row_dimensions[footer_row].height = footer_height
+
+    # ── 9. 门店列宽与模板 G 列保持一致 ──
     g_width = ws.column_dimensions["G"].width
     if g_width:
         for col_num in range(8, last_col + 1):
             ws.column_dimensions[get_column_letter(col_num)].width = g_width
 
-    for merge in list(ws.merged_cells.ranges):
-        if merge.min_row == 1 and merge.max_row == 1:
-            ws.unmerge_cells(str(merge))
-    if last_col > 5:
-        ws.merge_cells(start_row=1, start_column=5, end_row=1, end_column=last_col)
-
-    if data_count == 0:
-        for col in [7, 8]:  # G, H
-            for r in range(1, ws.max_row + 1):
-                cell = ws.cell(row=r, column=col)
-                if not isinstance(cell, MergedCell):
-                    cell.value = None
-        for col in range(1, ws.max_column + 1):
-            cell = ws.cell(row=3, column=col)
-            if not isinstance(cell, MergedCell):
-                cell.value = None
-
+    # ── 10. 更新日期（A6 下单 / C6 配送）──
     if target_date:
         target_dt = datetime.strptime(target_date, "%Y.%m.%d")
         prev_day = (target_dt - timedelta(days=2)).strftime("%Y.%m.%d")
-        for cell_ref, new_date in [("A1", prev_day), ("C1", target_date)]:
+        for cell_ref, new_date in [("A6", prev_day), ("C6", target_date)]:
             cell = ws[cell_ref]
             if cell.value:
-                cell.value = re.sub(r"\d{4}\.\d{2}\.\d{2}", new_date, str(cell.value))
+                cell.value = re.sub(r"\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}", new_date, str(cell.value))
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_file)
+    wb.close()
     logger.info(f"  已生成格式化文件: {output_file}")
 
 
@@ -647,12 +768,13 @@ def main():
 
             date_str = target_date.replace(".", "-")
             report_stores, report_rows = read_report_data(report_path)
+            amount_sums = compute_amount_sums(report_rows)
 
             all_output = OUTPUT_DIR / date_str / f"兔司家门店订购商品统计表_格式化_全部_{date_str}.xlsx"
             merge_into_template(
                 report_stores, report_rows,
                 TEMPLATE_FILE, all_output,
-                target_date=target_date,
+                amount_sums, target_date=target_date,
             )
             logger.info(f"  [全部] {len(report_rows)} 行 → {all_output}")
 
@@ -671,15 +793,15 @@ def main():
                 merge_into_template(
                     report_stores, filtered_rows,
                     TEMPLATE_FILE, output_file,
-                    target_date=target_date,
+                    amount_sums, target_date=target_date,
                 )
 
                 if export_name == "面团":
                     wb_tmp = load_workbook(output_file)
                     ws_tmp = wb_tmp.active
                     for r in range(DATA_START_ROW, ws_tmp.max_row + 1):
-                        cell = ws_tmp.cell(row=r, column=2)
-                        if cell.value is not None and str(cell.value).strip() != "-":
+                        cell = ws_tmp.cell(row=r, column=3)  # C 列：商品名称
+                        if cell.value is not None:
                             cell.font = cell.font.copy(size=12)
                     wb_tmp.save(output_file)
                     wb_tmp.close()
