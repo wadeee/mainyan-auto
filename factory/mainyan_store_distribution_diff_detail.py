@@ -285,7 +285,25 @@ def merge_into_template(stores_data, template_file, output_file, target_date):
     date_str = target_date.strftime("%Y年%#m月%#d日") if sys.platform == "win32" else target_date.strftime(
         "%Y年%-m月%-d日")
 
-    for store_full_name, products in stores_data.items():
+    # 按 STORE_NAME_MAP 的固定顺序生成 sheet（仅保留有数据的门店），
+    # 保证导出后 sheet 顺序与配置一致，而不是跟着下载文件里的行顺序走。
+    ordered_stores = [
+        (full_name, stores_data[full_name])
+        for full_name in STORE_NAME_MAP
+        if full_name in stores_data
+    ]
+    # 兜底：数据中存在但未在 STORE_NAME_MAP 配置的门店，保持原顺序追加到最后
+    ordered_stores += [
+        (full_name, products)
+        for full_name, products in stores_data.items()
+        if full_name not in STORE_NAME_MAP
+    ]
+
+    missing_stores = [name for name in STORE_NAME_MAP if name not in stores_data]
+    if missing_stores:
+        logger.info(f"  当日无数据，跳过生成 sheet：{', '.join(missing_stores)}")
+
+    for store_full_name, products in ordered_stores:
         store_short = STORE_NAME_MAP.get(store_full_name, store_full_name)
 
         # 复制模板的第一个sheet
@@ -374,6 +392,10 @@ def merge_into_template(stores_data, template_file, output_file, target_date):
                 dst_cell.value = value
 
         logger.info(f"  生成 {store_short} sheet，{data_row_count} 行数据")
+
+    # 打开文件时默认停留在第一个 sheet（即 STORE_NAME_MAP 中第一家门店）
+    if wb_output.worksheets:
+        wb_output.active = 0
 
     wb_template.close()
 
