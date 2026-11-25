@@ -1633,142 +1633,379 @@ def dismiss_koubei_popup(page):
         pass
 
 
+# ─── aamf 日期范围选择器（阿里 aamf，Ant Design 风格）─────────────────────────
+# 该选择器改版过：老版本弹层底部有「确定」按钮，新版本没有，
+# 改成“输入后回车 / 点日历格”即生效。下面的封装对新旧版本都兼容。
+PICKER_PANEL_SELECTORS = (
+    ".aamf-picker-dropdown",
+    ".aamf-picker-panel-container",
+    "[class*='picker-dropdown']",
+    "[class*='picker-panel-container']",
+)
+PICKER_PANEL_SELECTOR = ", ".join(PICKER_PANEL_SELECTORS)
+
+_PICKER_CONFIRM_LABELS = ("确定", "OK", "完成", "应用")
+
+
+def _picker_panel(page):
+    """返回当前可见的日期弹层 locator，没有则返回 None。"""
+    for sel in PICKER_PANEL_SELECTORS:
+        try:
+            loc = page.locator(f"{sel}:visible")
+            if loc.count() > 0:
+                return loc.first
+        except Exception:
+            continue
+    return None
+
+
+def _picker_wait_open(page, timeout=20000):
+    page.wait_for_selector(PICKER_PANEL_SELECTOR, state="visible", timeout=timeout)
+    return _picker_panel(page)
+
+
+def _date_input(page, which):
+    """定位开始/结束日期输入框：data 属性 → placeholder → 位置兜底。"""
+    keyword = "开始" if which == "start" else "结束"
+    for sel in (f"input[date-range='{which}']", f"input[placeholder*='{keyword}']"):
+        try:
+            loc = page.locator(sel)
+            if loc.count() > 0:
+                return loc.first
+        except Exception:
+            continue
+    loc = page.locator("[class*='picker-range'] input")
+    if loc.count() >= 2:
+        return loc.first if which == "start" else loc.nth(1)
+    return None
+
+
+def _picker_click_confirm(page) -> bool:
+    """兼容老版本：弹层底部有「确定」按钮时点它（新版本没有该按钮，直接返回 False）。"""
+    panel = _picker_panel(page)
+    if panel is None:
+        return False
+    result = panel.evaluate(
+        """
+        (panel) => {
+            const labels = ['确定', 'OK', '完成', '应用'];
+            const nodes = panel.querySelectorAll('button, [role=button], a');
+            for (const el of nodes) {
+                const text = (el.innerText || '').replace(/\\s+/g, '').trim();
+                if (!labels.includes(text)) continue;
+                const r = el.getBoundingClientRect();
+                if (r.width < 1 || r.height < 1) continue;
+                el.click();
+                return text;
+            }
+            return '';
+        }
+        """
+    )
+    if result:
+        page.wait_for_timeout(500)
+        return True
+    return False
+
+
+def _picker_months(page):
+    """读取弹层里各面板当前显示的年月，如 ['2026年11月', '2026年12月']。"""
+    panel = _picker_panel(page)
+    if panel is None:
+        return []
+    return panel.evaluate(
+        """
+        (panel) => {
+            const panels = [...panel.querySelectorAll('[class*=picker-panel]')]
+                .filter(p => p.querySelector('table'));
+            return panels.map(p => {
+                const y = p.querySelector('[class*=year-btn]');
+                const m = p.querySelector('[class*=month-btn]');
+                return (y && m) ? (y.innerText.trim() + m.innerText.trim()) : '';
+            }).filter(Boolean);
+        }
+        """
+    )
+
+
+def _picker_goto_month(page, target: datetime) -> bool:
+    """把日历翻到目标年月（以左侧面板为准），用于跨月选日期。"""
+    want = (target.year, target.month)
+    for _ in range(24):
+        months = _picker_months(page)
+        m = re.match(r"(\d{4})\s*年\s*(\d{1,2})\s*月", months[0]) if months else None
+        if not m:
+            return False
+        cur = (int(m.group(1)), int(m.group(2)))
+        if cur == want:
+            return True
+        cls = "header-prev-btn" if want < cur else "header-next-btn"
+        btn = page.locator(f"[class*='{cls}']:visible").first
+        if btn.count() == 0:
+            return False
+        btn.click()
+        page.wait_for_timeout(300)
+    return False
+
+
+def _picker_pick_day(page, day: str) -> bool:
+    """在当前弹层里点击某天的日历格（必要时先翻月）。"""
+    _picker_goto_month(page, datetime.strptime(day, "%Y-%m-%d"))
+    for sel in (f"td[title='{day}']:visible", f"td[title='{day}']"):
+        try:
+            cell = page.locator(sel)
+            if cell.count() > 0:
+                cell.first.click()
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def set_aamf_date_range(page, start_day: str, end_day: str, desc: str = ""):
+    """在 aamf 日期范围选择器里设置起止日期（YYYY-MM-DD）。
+
+    操作顺序（新旧版本通吃）：
+      1. 打开弹层后直接用键盘输入日期 + 回车（新版本这样即生效）；
+      2. 若弹层没关且底部有「确定」，点它（老版本行为）；
+      3. 仍没生效则退回“点日历格”：同一天点两次 = 开始/结束，必要时翻月；
+    最后用输入框的值校验，失败抛异常交给上层重试。
+    """
+    tag = f"    [{desc}] " if desc else "    "
+
+    def values():
+        s, e = _date_input(page, "start"), _date_input(page, "end")
+        return (s.input_value() if s else "", e.input_value() if e else "")
+
+    def committed():
+        s_val, e_val = values()
+        return s_val.startswith(start_day) and e_val.startswith(end_day)
+
+    start_input = _date_input(page, "start")
+    end_input = _date_input(page, "end")
+    if start_input is None or end_input is None:
+        raise RuntimeError(f"{tag}未找到日期范围输入框")
+
+    start_input.click()
+    _picker_wait_open(page)
+
+    # ① 键盘输入（新版本回车即提交）
+    for inp, day in ((start_input, start_day), (end_input, end_day)):
+        inp.click()
+        inp.press("Control+a")
+        inp.press("Backspace")
+        inp.type(day, delay=40)
+        inp.press("Enter")
+        page.wait_for_timeout(350)
+
+    # ② 老版本：弹层里还有「确定」就点一下
+    if _picker_panel(page) is not None and _picker_click_confirm(page):
+        logger.info(f"{tag}点击了日期弹层的「确定」按钮")
+
+    if _picker_panel(page) is None and committed():
+        logger.info(f"{tag}日期已设置: {start_day} ~ {end_day}")
+        return
+
+    # ③ 兜底：点日历格（同一天先点开始、再点结束）
+    logger.warning(f"{tag}键盘输入未生效（当前值 {values()}），改用点击日历格...")
+    if _picker_panel(page) is None:
+        start_input.click()
+        _picker_wait_open(page)
+    for day in (start_day, end_day):
+        if _picker_panel(page) is None:
+            start_input.click()
+            _picker_wait_open(page)
+        if not _picker_pick_day(page, day):
+            raise RuntimeError(f"{tag}在日历里找不到 {day} 的日期格")
+        page.wait_for_timeout(400)
+    if _picker_panel(page) is not None:
+        _picker_click_confirm(page)
+
+    if not committed():
+        raise RuntimeError(f"{tag}日期设置失败，当前值 {values()}（期望 {start_day} ~ {end_day}）")
+    logger.info(f"{tag}日期已设置: {start_day} ~ {end_day}")
+
+
 def koubei_set_date(page, target):
     """在高德口碑账单汇总页面设置日期范围（起止日期相同）。"""
-    date_start = target.strftime("%Y-%m-%d") + " 00:00:00"
-    date_end = target.strftime("%Y-%m-%d") + " 23:59:59"
-    logger.info(f"  → 设置日期: {date_start} ~ {date_end}...")
-    time.sleep(5)
-
-    start_input = page.locator('input[date-range="start"]')
-    start_input.click()
-    page.wait_for_selector('.aamf-picker-dropdown', state='visible', timeout=20000)
-
-    start_input.press("Control+a")
-    start_input.type(date_start, delay=30)
-
-    logger.info("    点击确定（开始时间）...")
-    page.locator('.aamf-picker-dropdown .aamf-picker-ok button').click()
-    time.sleep(0.5)
-
-    end_input = page.locator('input[date-range="end"]')
-    end_input.click()
-    page.wait_for_selector('.aamf-picker-dropdown', state='visible', timeout=10000)
-    end_input.press("Control+a")
-    end_input.type(date_end, delay=30)
-
-    logger.info("    点击确定（结束时间）...")
-    page.locator('.aamf-picker-dropdown .aamf-picker-ok button').click()
-    time.sleep(0.5)
-
-    logger.info(f"  日期已设置: {date_start} ~ {date_end}")
+    day = target.strftime("%Y-%m-%d")
+    logger.info(f"  → 设置日期: {day}...")
+    time.sleep(3)
+    set_aamf_date_range(page, day, day, desc="口碑")
 
 
 def koubei_select_query_type(page):
-    """在高德口碑页面将查询方式切换为"按门店查询"。"""
-    logger.info("  → 选择查询方式: 按门店查询...")
+    """把筛选维度切到「门店」。
+
+    新版页面把原来的“按门店查询/按时间查询”下拉换成了「筛选维度」下拉
+    （选项：收款账户 / 门店）；老版本选项叫「按门店查询」。两种都兼容。
+    """
+    logger.info("  → 选择筛选维度: 门店...")
 
     select_el = page.locator('.aamf-select-single').first
     select_el.click()
-    page.wait_for_selector('.aamf-select-item', state='visible', timeout=5000)
-    time.sleep(0.5)
+    page.wait_for_timeout(600)
 
     result = page.evaluate("""
-        (function() {
-            var items = document.querySelectorAll('.aamf-select-item');
-            for (var i = 0; i < items.length; i++) {
-                if (items[i].textContent.trim() === '按门店查询') {
-                    items[i].click();
-                    return 'selected: 按门店查询';
-                }
+        () => {
+            const wanted = ['门店', '按门店查询', '按门店'];
+            const items = [...document.querySelectorAll('.aamf-select-item')].filter(el => {
+                const r = el.getBoundingClientRect();
+                return r.width > 0 && r.height > 0;
+            });
+            for (const el of items) {
+                const text = (el.innerText || '').trim();
+                if (wanted.includes(text)) { el.click(); return 'selected: ' + text; }
             }
-            var names = [];
-            for (var i = 0; i < items.length; i++) names.push(items[i].textContent.trim());
-            return 'not found. Available: ' + names.join(', ');
-        })()
+            return 'not found. Available: ' + items.map(e => (e.innerText || '').trim()).join(', ');
+        }
     """)
-    logger.info(f"    查询方式: {result}")
+    logger.info(f"    筛选维度: {result}")
     time.sleep(1)
 
 
 def koubei_select_store(page, store_config):
-    """在高德口碑账单汇总页面选择单个门店（通过弹窗选择）。"""
+    """在高德口碑账单汇总页面选择单个门店。
+
+    新版：点「全部门店 / 全部账号」触发器 → 弹窗「取消全选」→ 勾选门店 → 确定；
+    老版：点只读输入框 → 弹窗里勾选 → 确定。两种结构都兼容。
+    """
     store_name = store_config["store_name"]
     logger.info(f"  → 选择门店: {store_name}...")
 
-    store_input = page.locator('input[placeholder="请选择"][readonly]')
-    store_input.click(force=True)
-    time.sleep(0.5)
+    trigger = page.locator("button[class*='pickerTrigger']").first
+    if trigger.count() == 0:
+        trigger = page.locator('input[placeholder="请选择"][readonly]').first
+    trigger.click(force=True)
 
     try:
         page.wait_for_selector('.aamf-modal', timeout=20000)
     except Exception:
         logger.warning("  门店选择弹窗未出现，尝试再次点击...")
-        store_input.click(force=True)
+        trigger.click(force=True)
         page.wait_for_selector('.aamf-modal', timeout=20000)
 
-    page.wait_for_selector('.aamf-modal .aamf-table-tbody tr.aamf-table-row', timeout=10000)
+    # 新版默认勾选“全部门店”，先取消全选才会出现门店列表
+    clear_btn = page.locator('.aamf-modal-footer button', has_text='取消全选')
+    if clear_btn.count() > 0:
+        clear_btn.first.click()
+        page.wait_for_timeout(800)
 
-    page.evaluate("""
-        (function() {
-            var rows = document.querySelectorAll('.aamf-modal .aamf-table-tbody tr.aamf-table-row');
-            for (var i = 0; i < rows.length; i++) {
-                var cb = rows[i].querySelector('.aamf-checkbox-input');
-                if (cb && cb.checked) {
-                    cb.click();
+    page.wait_for_selector('.aamf-modal .aamf-table-tbody tr.aamf-table-row', timeout=15000)
+
+    result = page.evaluate("""
+        (args) => {
+            const name = args.name;
+            const rows = [...document.querySelectorAll('.aamf-modal .aamf-table-tbody tr.aamf-table-row')];
+            const checkboxOf = row => row.querySelector('input.aamf-checkbox-input, input[type=checkbox]');
+            const cellsOf = row => [...row.querySelectorAll('td')].map(td => (td.innerText || '').trim());
+
+            // 先全部取消，避免沿用上一次的选择
+            rows.forEach(row => {
+                const cb = checkboxOf(row);
+                if (cb && cb.checked) cb.click();
+            });
+
+            // 精确匹配门店名称
+            for (const row of rows) {
+                if (cellsOf(row).includes(name)) {
+                    const cb = checkboxOf(row);
+                    if (cb && !cb.checked) cb.click();
+                    return 'checked: ' + name;
                 }
             }
-        })()
-    """)
-
-    result = page.evaluate(f"""
-        (function() {{
-            var rows = document.querySelectorAll('.aamf-modal .aamf-table-tbody tr.aamf-table-row');
-            for (var i = 0; i < rows.length; i++) {{
-                var tds = rows[i].querySelectorAll('td.aamf-table-cell');
-                for (var j = 0; j < tds.length; j++) {{
-                    if (tds[j].textContent.trim() === '{store_name}') {{
-                        var cb = rows[i].querySelector('.aamf-checkbox-input');
-                        if (cb && !cb.checked) cb.click();
-                        return 'checked: ' + tds[j].textContent.trim();
-                    }}
-                }}
-            }}
-            var names = [];
-            for (var i = 0; i < rows.length; i++) {{
-                var tds = rows[i].querySelectorAll('td.aamf-table-cell');
-                if (tds.length >= 3) names.push(tds[2].textContent.trim());
-            }}
-            return 'not found: {store_name}. Available: ' + names.join(', ');
-        }})()
-    """)
+            // 退一步模糊匹配（门店名前后可能带品牌前缀）
+            for (const row of rows) {
+                const hit = cellsOf(row).find(t => t && (t.includes(name) || name.includes(t)) && t.length > 2);
+                if (hit) {
+                    const cb = checkboxOf(row);
+                    if (cb && !cb.checked) cb.click();
+                    return 'checked(contains): ' + hit;
+                }
+            }
+            return 'not found: ' + name + '. Available: ' + rows.map(r => cellsOf(r).join('|')).join(', ');
+        }
+    """, {"name": store_name})
     logger.info(f"    选择门店: {result}")
-    time.sleep(0.5)
+    page.wait_for_timeout(400)
 
-    confirm_btn = page.locator('.aamf-modal-footer button.aamf-btn-primary')
+    confirm_btn = page.locator('.aamf-modal-footer button.aamf-btn-primary').first
+    try:
+        confirm_btn.wait_for(state='visible', timeout=10000)
+    except Exception:
+        pass
+    if not confirm_btn.is_enabled():
+        raise RuntimeError(f"门店选择弹窗的「确定」按钮不可用，选择结果: {result}")
     confirm_btn.click()
-    page.wait_for_selector('.aamf-modal', state='hidden', timeout=10000)
+    page.wait_for_selector('.aamf-modal', state='hidden', timeout=15000)
     logger.info("    弹窗已确认")
 
 
+def koubei_wait_refresh(page, timeout=30000):
+    """等页面数据刷新。
+
+    新版改完筛选条件会自动刷新，只有「刷新」按钮；老版本需要点「查询」。
+    """
+    query_btn = page.locator('button.aamf-btn-primary:has-text("查 询")')
+    if query_btn.count() > 0:
+        query_btn.first.click()
+    else:
+        refresh_btn = page.locator('button', has_text='刷新')
+        if refresh_btn.count() > 0:
+            refresh_btn.first.click()
+
+    page.wait_for_selector('[class*=fieldLabel], .name--pnzqmgDZ', timeout=timeout)
+    time.sleep(3)
+
+
 def scrape_koubei_bill(page):
-    """从高德口碑账单汇总页面抓取汇总区域的数据。"""
+    """抓取汇总区的 订单金额 / 商家优惠 / 服务费。
+
+    按文字标签定位（新版类名是哈希值，会随打包变化），取第一个匹配到的指标块；
+    老版本再用旧类名兜底。
+    """
     data = page.evaluate("""
-        (function() {
-            var result = {};
-            var nameEls = document.querySelectorAll('.name--pnzqmgDZ');
-            var valueEls = document.querySelectorAll('.value--NiKhfQ57');
-            for (var i = 0; i < nameEls.length; i++) {
-                var rawName = nameEls[i].textContent.trim();
-                var name = rawName.replace(/（元）/g, '').replace(/\\(元\\)/g, '');
-                if (i < valueEls.length) {
-                    var val = parseFloat(valueEls[i].textContent.trim().replace(/,/g, '')) || 0;
-                    result[name] = val;
-                }
+        () => {
+            const wanted = ['订单金额', '商家优惠', '服务费'];
+            const norm = s => (s || '').replace(/\\s+/g, '').replace(/[（(]元[)）]/, '');
+            const parseNum = s => {
+                const m = (s || '').replace(/,/g, '').match(/-?\\d+(?:\\.\\d+)?/);
+                return m ? parseFloat(m[0]) : null;
+            };
+
+            const result = {};
+            const labels = [...document.querySelectorAll('[class*=fieldLabel], [class*=metricLabel], [class*=name--]')];
+            for (const el of labels) {
+                const key = wanted.find(w => norm(el.innerText) === w);
+                if (!key || key in result) continue;
+                const box = el.closest('[class*=metric]') || el.parentElement;
+                if (!box) continue;
+                const val = parseNum((box.innerText || '').replace(el.innerText, ''));
+                if (val !== null) result[key] = val;
             }
             return result;
-        })()
+        }
     """)
+
+    if not data:
+        data = page.evaluate("""
+            () => {
+                const result = {};
+                const nameEls = document.querySelectorAll('.name--pnzqmgDZ');
+                const valueEls = document.querySelectorAll('.value--NiKhfQ57');
+                for (let i = 0; i < nameEls.length; i++) {
+                    const name = nameEls[i].textContent.trim().replace(/[（(]元[)）]/g, '');
+                    if (i < valueEls.length) {
+                        result[name] = parseFloat(valueEls[i].textContent.trim().replace(/,/g, '')) || 0;
+                    }
+                }
+                return result;
+            }
+        """)
+
+    # 归一 -0.0，避免写进 CSV 变成 "-0.0"
+    data = {k: (0.0 if v == 0 else v) for k, v in (data or {}).items()}
+
     if not data:
         logger.warning("  未抓取到口碑数据，可能页面未加载完成")
     else:
@@ -2667,10 +2904,8 @@ def _run_koubei_task(args, target, target_str, date_label, output_dir):
                     koubei_set_date(kb_page, target)
                     koubei_select_query_type(kb_page)
                     koubei_select_store(kb_page, cfg)
-                    logger.info(f"{TAG}  [查询] 点击查询...")
-                    kb_page.locator('button.aamf-btn-primary:has-text("查 询")').click()
-                    kb_page.wait_for_selector('.name--pnzqmgDZ', timeout=30000)
-                    time.sleep(3)
+                    logger.info(f"{TAG}  [查询] 等待数据刷新...")
+                    koubei_wait_refresh(kb_page)
                     kb_data = scrape_koubei_bill(kb_page)
                     save_koubei_bill_csv(kb_data, ss, date_label, output_dir)
 
