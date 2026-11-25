@@ -124,6 +124,17 @@ DATA_START_ROW = 8
 HEADER_ROW = 7
 TOTAL_ORDER_HEADER = "合计订货量"
 
+# 「合计订货量」之后仍属于商品/单位信息、不是门店的列。
+# 2026-11 网站改版后汇总看板新增「主单位」「合计订货量(主)」两列（原「单位」改名为「订货单位」），
+# 若把它们当门店列，导出结果就会多出两列且数值错位。
+NON_STORE_HEADERS = {
+    "单位",
+    "订货单位",
+    "主单位",
+    "合计订货量(主)",
+    "合计订货量（主）",
+}
+
 FIXED_COLUMN_MAP = [
     (1, 2),  # 商品分类 -> B
     (3, 3),  # 商品名称 -> C
@@ -192,6 +203,24 @@ def read_report_data(report_file: Path):
     return [name for _, name in stores], rows
 
 
+def locate_columns(ws, wanted: list[str]) -> dict[str, int]:
+    """按表头名称定位明细表的列（0 基索引）。
+
+    不写死列号：网站改版（如新增「拆单状态」、调整列顺序）时不会取错列。
+    """
+    headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
+    found: dict[str, int] = {}
+    for name in wanted:
+        found[name] = next(
+            (i for i, h in enumerate(headers) if h is not None and str(h).strip() == name),
+            None,
+        )
+    missing = [name for name, idx in found.items() if idx is None]
+    if missing:
+        raise ValueError(f"明细表缺少列: {', '.join(missing)}（当前表头: {headers}）")
+    return found
+
+
 def compute_category_sums(detail_file: Path, store_names: set[str]) -> dict:
     wb = load_workbook(detail_file, data_only=True)
     ws = wb.active
@@ -201,11 +230,14 @@ def compute_category_sums(detail_file: Path, store_names: set[str]) -> dict:
         for cat in categories:
             cat_to_row[cat] = row_num
 
+    cols = locate_columns(ws, ["商品分类", "订货组织", "订货金额"])
+    cat_idx, org_idx, amt_idx = cols["商品分类"], cols["订货组织"], cols["订货金额"]
+
     sums: dict[tuple[int, str], float] = {}
     for row in ws.iter_rows(min_row=2):
-        category = row[1].value  # B列：商品分类
-        org = row[5].value  # F列：订货组织
-        amount = row[14].value  # N列：订货金额
+        category = row[cat_idx].value
+        org = row[org_idx].value
+        amount = row[amt_idx].value
 
         if category is None or org is None or amount is None:
             continue
@@ -229,11 +261,14 @@ def compute_category_sums(detail_file: Path, store_names: set[str]) -> dict:
 def compute_detail_sums_by_category(detail_file: Path, store_names: set[str]) -> dict:
     wb = load_workbook(detail_file, data_only=True)
     ws = wb.active
+    cols = locate_columns(ws, ["商品分类", "订货组织", "订货金额"])
+    cat_idx, org_idx, amt_idx = cols["商品分类"], cols["订货组织"], cols["订货金额"]
+
     sums: dict[tuple[str, str], float] = {}
     for row in ws.iter_rows(min_row=2):
-        category = row[1].value
-        org = row[5].value
-        amount = row[14].value
+        category = row[cat_idx].value
+        org = row[org_idx].value
+        amount = row[amt_idx].value
         if category is None or org is None or amount is None:
             continue
         cat_str = str(category).strip()
@@ -263,24 +298,52 @@ def aggregate_to_row_sums(detail_sums: dict, allowed_categories: set[str] | None
     return sums
 
 
+def find_total_column(headers) -> int:
+    """定位「合计订货量」列（0 基索引）。
+
+    优先精确匹配「合计订货量」，避免命中改版后新增的「合计订货量(主)」，
+    否则合计列会取到主单位口径，与各门店的订货单位数量对不上。
+    """
+    for i, h in enumerate(headers):
+        if h is not None and str(h).strip() == TOTAL_ORDER_HEADER:
+            return i
+    for i, h in enumerate(headers):
+        if h is not None and TOTAL_ORDER_HEADER in str(h) and "主" not in str(h):
+            return i
+    raise ValueError(f"数据源中找不到'{TOTAL_ORDER_HEADER}'列")
+
+
+def is_store_column(header) -> bool:
+    """判断表头是否为门店列（排除单位、合计等改版后新增的非门店列）"""
+    if header is None:
+        return False
+    name = str(header).strip()
+    if not name or name in NON_STORE_HEADERS:
+        return False
+    # 兜底：含「单位」或「合计订货量」的列一定不是门店
+    if "单位" in name or TOTAL_ORDER_HEADER in name:
+        return False
+    return True
+
+
 def read_data_file(data_file: Path):
     wb = load_workbook(data_file)
     ws = wb.active
 
-    headers = [cell.value for cell in list(ws.iter_rows(min_row=1, max_row=1))[0]]
+    # 表头中可能有空列名（A 列序号列），逐列读取更稳妥
+    headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
 
-    total_col_idx = None
-    for i, h in enumerate(headers):
-        if h and TOTAL_ORDER_HEADER in str(h):
-            total_col_idx = i
-            break
-    if total_col_idx is None:
-        raise ValueError(f"数据源中找不到'{TOTAL_ORDER_HEADER}'列")
+    total_col_idx = find_total_column(headers)
 
     store_columns = []
+    skipped = []
     for i in range(total_col_idx + 1, len(headers)):
-        if headers[i] is not None and str(headers[i]).strip():
+        if is_store_column(headers[i]):
             store_columns.append((i, str(headers[i]).strip()))
+        elif headers[i] is not None and str(headers[i]).strip():
+            skipped.append(str(headers[i]).strip())
+    if skipped:
+        logger.info(f"  跳过非门店列: {', '.join(skipped)}")
 
     rows = []
     for row in ws.iter_rows(min_row=2):
@@ -321,11 +384,15 @@ def merge_into_template(data_rows, total_col_idx, store_columns, template_file, 
             for new_col in range(template_max_col + 1, last_col + 1):
                 copy_cell_style(src, ws.cell(row=row, column=new_col))
 
-    first_store = get_column_letter(7)
-    last_store = get_column_letter(last_col)
-    for r in range(2, 6):
-        ws.cell(row=r, column=6).value = f"=SUM({first_store}{r}:{last_store}{r})"
-    ws.cell(row=6, column=6).value = f"=SUM({first_store}6:{last_store}6)"
+    if store_count:
+        first_store = get_column_letter(7)
+        last_store = get_column_letter(last_col)
+        for r in range(2, 7):
+            ws.cell(row=r, column=6).value = f"=SUM({first_store}{r}:{last_store}{r})"
+    else:
+        logger.warning("未识别到任何门店列，合计列将写成 0")
+        for r in range(2, 7):
+            ws.cell(row=r, column=6).value = 0
 
     sample_cells = list(ws.iter_rows(
         min_row=SAMPLE_ROW_START,
@@ -446,6 +513,23 @@ def merge_board(data_file: Path, detail_file: Path, template_file: Path, output_
     logger.info(f"  共 {len(data_rows)} 行数据")
     logger.info(f"  合计订货量列: {get_column_letter(total_col_idx + 1)} (索引 {total_col_idx})")
     logger.info(f"  门店列 ({len(store_columns)}): {', '.join(name for _, name in store_columns)}")
+
+    # 列识别自检：各门店数量之和应等于「合计订货量」。若网站再次改版导致列错位，这里会报警。
+    mismatch = 0
+    for row_data in data_rows:
+        try:
+            total = float(row_data[total_col_idx] or 0)
+            store_sum = sum(float(row_data[i] or 0) for i, _ in store_columns)
+        except (TypeError, ValueError):
+            mismatch += 1
+            continue
+        if abs(total - store_sum) > 1e-6:
+            mismatch += 1
+    if mismatch:
+        logger.warning(
+            f"  ⚠ 有 {mismatch}/{len(data_rows)} 行「门店合计」≠「合计订货量」，"
+            f"网站列可能又变了，请核对原始下载文件: {data_file}"
+        )
 
     category_sums = {}
     if detail_file.exists():
