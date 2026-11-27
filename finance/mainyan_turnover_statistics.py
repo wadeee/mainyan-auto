@@ -1634,8 +1634,12 @@ def dismiss_koubei_popup(page):
 
 
 # ─── aamf 日期范围选择器（阿里 aamf，Ant Design 风格）─────────────────────────
-# 该选择器改版过：老版本弹层底部有「确定」按钮，新版本没有，
-# 改成“输入后回车 / 点日历格”即生效。下面的封装对新旧版本都兼容。
+# 该选择器改版过，且现版本是「日期+时间」的范围选择器：
+#   · 输入框的值是完整时间戳（2026-11-25 00:00:00 / 2026-11-25 23:59:59）；
+#   · 只输入 YYYY-MM-DD 会被判为非法，按回车后静默回滚到旧值（表现为怎么重试都
+#     只改掉开始日期，结束日期一直停在默认的今天）；
+#   · 弹层里只有一个日历面板 + 时间列，底部有「确定」。
+# 所以下面统一按“输入完整时间戳 + 回车 / 切底点日历格 + 确定”来处理。
 PICKER_PANEL_SELECTORS = (
     ".aamf-picker-dropdown",
     ".aamf-picker-panel-container",
@@ -1681,11 +1685,19 @@ def _date_input(page, which):
 
 
 def _picker_click_confirm(page) -> bool:
-    """兼容老版本：弹层底部有「确定」按钮时点它（新版本没有该按钮，直接返回 False）。"""
-    panel = _picker_panel(page)
-    if panel is None:
+    """点弹层底部的「确定」按钮（带时间的范围选择器才有），返回是否点到了。"""
+    # 弹层可能有多个（旧的隐藏实例），只找真正可见的那个
+    dropdown = page.locator(".aamf-picker-dropdown:visible, [class*='picker-dropdown']:visible")
+    scope = None
+    for i in range(dropdown.count()):
+        if dropdown.nth(i).is_visible():
+            scope = dropdown.nth(i)
+            break
+    if scope is None:
+        scope = _picker_panel(page)
+    if scope is None:
         return False
-    result = panel.evaluate(
+    result = scope.evaluate(
         """
         (panel) => {
             const labels = ['确定', 'OK', '完成', '应用'];
@@ -1703,9 +1715,19 @@ def _picker_click_confirm(page) -> bool:
         """
     )
     if result:
-        page.wait_for_timeout(500)
+        page.wait_for_timeout(600)
         return True
     return False
+
+
+def _picker_close(page):
+    """弹层还开着就按 Esc 关掉，避免遮住后面的按钮。"""
+    if _picker_panel(page) is not None:
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+        except Exception:
+            pass
 
 
 def _picker_months(page):
@@ -1762,14 +1784,32 @@ def _picker_pick_day(page, day: str) -> bool:
     return False
 
 
+def _aamf_fill_input(page, inp, text, delay=40):
+    """在单个日期输入框里输入完整时间戳并回车提交。
+
+    这类 aamf 范围选择器是「日期+时间」的（输入框值形如 2026-11-25 00:00:00），
+    只输入日期（2026-11-25）会被判为非法，按回车后静默回滚到旧值，
+    所以必须带上时间（00:00:00 / 23:59:59）。
+    """
+    inp.click()
+    page.wait_for_timeout(200)
+    inp.press("Control+a")
+    inp.press("Backspace")
+    inp.type(text, delay=delay)
+    inp.press("Enter")
+    page.wait_for_timeout(450)
+
+
 def set_aamf_date_range(page, start_day: str, end_day: str, desc: str = ""):
     """在 aamf 日期范围选择器里设置起止日期（YYYY-MM-DD）。
 
-    操作顺序（新旧版本通吃）：
-      1. 打开弹层后直接用键盘输入日期 + 回车（新版本这样即生效）；
-      2. 若弹层没关且底部有「确定」，点它（老版本行为）；
-      3. 仍没生效则退回“点日历格”：同一天点两次 = 开始/结束，必要时翻月；
-    最后用输入框的值校验，失败抛异常交给上层重试。
+    该选择器是带时间的范围选择器（输入格式 YYYY-MM-DD HH:mm:ss，弹层里有
+    「确定」）。设置顺序：
+      ① 两个输入框分别输入「<日期> 00:00:00」「<日期> 23:59:59」后回车；
+      ② 弹层若还开着，点弹层里的「确定」；
+      ③ 校验不通过就放慢打字速度再试一次（页面偶发重渲染会吞掉按键）；
+      ④ 仍不行退回“点日历格 + 确定”的老路（跨月自动翻页）；
+      最后以输入框里的真实值为准，失败抛异常交给上层重试。
     """
     tag = f"    [{desc}] " if desc else "    "
 
@@ -1779,48 +1819,58 @@ def set_aamf_date_range(page, start_day: str, end_day: str, desc: str = ""):
 
     def committed():
         s_val, e_val = values()
-        return s_val.startswith(start_day) and e_val.startswith(end_day)
+        if s_val[:10] != start_day or e_val[:10] != end_day:
+            return False
+        # 起止不能倒挂（选择器会把格子自动排序，可能排出 23:59:59 ~ 00:00:00）
+        return s_val < e_val
 
     start_input = _date_input(page, "start")
     end_input = _date_input(page, "end")
     if start_input is None or end_input is None:
         raise RuntimeError(f"{tag}未找到日期范围输入框")
 
-    start_input.click()
-    _picker_wait_open(page)
+    # ① 键盘输入完整时间戳（带时间的范围选择器只有这样才会真正提交）
+    for attempt in (1, 2):
+        _aamf_fill_input(
+            page, start_input, f"{start_day} 00:00:00",
+            delay=40 if attempt == 1 else 90,
+        )
+        _aamf_fill_input(
+            page, end_input, f"{end_day} 23:59:59",
+            delay=40 if attempt == 1 else 90,
+        )
 
-    # ① 键盘输入（新版本回车即提交）
-    for inp, day in ((start_input, start_day), (end_input, end_day)):
-        inp.click()
-        inp.press("Control+a")
-        inp.press("Backspace")
-        inp.type(day, delay=40)
-        inp.press("Enter")
-        page.wait_for_timeout(350)
+        if _picker_panel(page) is not None:
+            if _picker_click_confirm(page):
+                logger.info(f"{tag}点击了日期弹层的「确定」按钮")
 
-    # ② 老版本：弹层里还有「确定」就点一下
-    if _picker_panel(page) is not None and _picker_click_confirm(page):
-        logger.info(f"{tag}点击了日期弹层的「确定」按钮")
+        if committed():
+            _picker_close(page)
+            logger.info(f"{tag}日期已设置: {values()[0]} ~ {values()[1]}")
+            return
 
-    if _picker_panel(page) is None and committed():
-        logger.info(f"{tag}日期已设置: {start_day} ~ {end_day}")
-        return
+        logger.warning(f"{tag}第 {attempt} 次输入未生效（当前值 {values()}），"
+                       f"继续尝试...")
+        page.wait_for_timeout(600)
 
-    # ③ 兜底：点日历格（同一天先点开始、再点结束）
+    # ② 兜底：点日历格（开始、结束分别点，跨月自动翻页），再点「确定」
     logger.warning(f"{tag}键盘输入未生效（当前值 {values()}），改用点击日历格...")
-    if _picker_panel(page) is None:
-        start_input.click()
-        _picker_wait_open(page)
-    for day in (start_day, end_day):
-        if _picker_panel(page) is None:
-            start_input.click()
-            _picker_wait_open(page)
-        if not _picker_pick_day(page, day):
-            raise RuntimeError(f"{tag}在日历里找不到 {day} 的日期格")
-        page.wait_for_timeout(400)
-    if _picker_panel(page) is not None:
-        _picker_click_confirm(page)
+    _picker_close(page)
+    for inp, day in ((start_input, start_day), (end_input, end_day)):
+        try:
+            inp.click()
+            page.wait_for_timeout(600)
+            if not _picker_pick_day(page, day):
+                raise RuntimeError(f"在日历里找不到 {day} 的日期格")
+            page.wait_for_timeout(400)
+            if _picker_panel(page) is not None:
+                _picker_click_confirm(page)
+        except RuntimeError:
+            raise
+        except Exception as e:
+            logger.warning(f"{tag}点日历格出错: {e}")
 
+    _picker_close(page)
     if not committed():
         raise RuntimeError(f"{tag}日期设置失败，当前值 {values()}（期望 {start_day} ~ {end_day}）")
     logger.info(f"{tag}日期已设置: {start_day} ~ {end_day}")
